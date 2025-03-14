@@ -1,0 +1,17 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "/data/vendor/boost/include",
+                "/data/vendor/openssl/include"
+            ],
+            "defines": [],
+            "compilerPath": "/data/server/compiler/bin/clang++",
+            "intelliSenseMode": "linux-clang-x64",
+            "cStandard": "c23",
+            "cppStandard": "c++23"
+        }
+    ],
+    "version": 4
+}
