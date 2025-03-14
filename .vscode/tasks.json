@@ -7,10 +7,14 @@
 			"command": "/root/.local/bin/xmake",
 			"args": [
 				"build",
-				"--root"
+				"--root",
+				"--verbose"
 			],
 			"options": {
-				"cwd": "${workspaceFolder}"
+				"cwd": "${workspaceFolder}",
+				"env": {
+					"PATH": "/data/server/compiler/bin:${env:PATH}"
+				},
 			},
 			"problemMatcher": [
 				"$gcc"

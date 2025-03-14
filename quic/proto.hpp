@@ -1,12 +1,14 @@
 #ifndef QUIC_PROTO_H
 #define QUIC_PROTO_H
 
-#include <boost/asio/ip/basic_endpoint.hpp>
+#include "basic_endpoint.hpp"
 
 namespace quic {
 
 class proto {
 public:
+    using endpoint = basic_endpoint<proto>;
+
     static proto unspecified() noexcept {
         return proto(BOOST_ASIO_OS_DEF(AF_UNSPEC));
     }

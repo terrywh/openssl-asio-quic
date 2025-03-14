@@ -21,6 +21,9 @@ private:
     : addr_(addr) {}
 
 public:
+    basic_endpoint()
+    : addr_(nullptr) {}
+
     basic_endpoint(const basic_endpoint& e)
     : addr_(BIO_ADDR_dup(e.addr_)) {}
 
@@ -29,7 +32,8 @@ public:
     }    
 
     protocol_type protocol() const {
-        return BIO_ADDR_family(addr_) == AF_INET6 ? protocol_type::v6() : protocol_type::v4();
+        return addr_ == nullptr ? protocol_type::unspecified() : 
+            BIO_ADDR_family(addr_) == AF_INET6 ? protocol_type::v6() : protocol_type::v4();
     }
 
     const void* data() const {
