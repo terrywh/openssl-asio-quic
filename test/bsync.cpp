@@ -34,9 +34,8 @@ void run(boost::asio::io_context& io) {
         "\r\n"
     };
 
-    quic::stream stream;
     try {
-        conn.create_stream(stream);
+        quic::stream stream = conn.create_stream();
         std::cout << "stream: \n";
 
         std::size_t size = stream.write_some(boost::asio::buffer(payload));

@@ -2,6 +2,7 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/function.hpp>
 #include <iostream>
 
 
@@ -35,9 +36,8 @@ boost::asio::awaitable<void> run(boost::asio::io_context& io) {
         "\r\n"
     };
 
-    quic::stream stream;
     try {
-        conn.create_stream(stream);
+        quic::stream stream = conn.create_stream();
         std::cout << "stream: \n";
 
         std::size_t size = stream.write_some(boost::asio::buffer(payload));
