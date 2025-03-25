@@ -45,7 +45,7 @@ boost::asio::awaitable<void> run(boost::asio::io_context& io) {
         stream.shutdown(boost::asio::socket_base::shutdown_send);
 
         payload.resize(1024);
-        size = stream.read_some(boost::asio::buffer(payload));
+        size = co_await stream.async_read_some(boost::asio::buffer(payload), boost::asio::use_awaitable);
         payload.resize(size);
         std::cout << "read: (" << size << ")\n";
 

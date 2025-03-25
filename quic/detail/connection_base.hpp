@@ -7,7 +7,8 @@
 #include "../basic_endpoint.hpp"
 #include "../proto.hpp"
 
-#include <boost/function.hpp>
+#include <proxy.h>
+#include <chrono>
 #include <vector>
 
 namespace quic {
@@ -24,15 +25,25 @@ class connection_base {
     template <class Protocol1, class Executor1>
     friend class accept_stream_impl;
 
+    template <class Protocol1, class Executor1, class MutableBufferSequence>
+    friend struct read_some_impl;
+
 public:
     
     using endpoint_type = basic_endpoint<Protocol>;
-    using callback_type = boost::function<void (boost::system::error_code)>;
+    struct Callback : pro::facade_builder
+        ::add_convention<pro::operator_dispatch<"()">, void(boost::system::error_code)>
+        ::support_view
+        ::build {};
+    using callback_type = pro::proxy<Callback>;
+
+    using socket_type = boost::asio::basic_datagram_socket<Protocol, Executor>;
 
 protected:
     boost::asio::ssl::context& ctx_;
     boost::asio::strand<Executor> strand_;
-    boost::asio::basic_datagram_socket<Protocol, Executor> socket_;
+    socket_type socket_;
+    boost::asio::steady_timer timer_;
     
     SSL* ssl_ = nullptr;
 
@@ -40,40 +51,68 @@ private:
     std::vector<callback_type> readable_;
     std::vector<callback_type> writable_;
 
+    void start() {
+        if (!SSL_handle_events(ssl_)) {
+            // TODO
+        }
+        struct timeval tv;
+        int inf;
+        if (!SSL_get_event_timeout(ssl_, &tv, &inf)) {
+            // TODO
+        }
+        timer_.expires_after(std::chrono::seconds(tv.tv_sec) + std::chrono::microseconds(tv.tv_usec));
+        timer_.async_wait([this] (boost::system::error_code error) {
+            if (error) return;
+            start();
+        });
+        // socket_.async_wait(boost::asio::socket_base::wait_read, [this] (boost::system::error_code error) {
+        //     if (error) return;
+        //     start();
+        // });
+        // socket_.async_wait(boost::asio::socket_base::wait_write, [this] (boost::system::error_code error) {
+        //     if (error) return;
+        //     start();
+        // });
+        // socket_.async_wait(boost::asio::socket_base::wait_error, [this] (boost::system::error_code error) {
+        //     if (error) return;
+        //     start();
+        // });
+    }
+
 protected:
-    // void on_readable(callback_type cb) {
+    void on_readable(callback_type cb) {
 
 
-    //     boost::asio::post(strand_, [this, cb = std::move(cb)] () {
-    //         readable_.emplace_back(std::move(cb));
-    //         if (readable_.size() == 1) {
-    //             socket_.async_wait(boost::asio::socket_base::wait_read, [this] (boost::system::error_code error) {
-    //                 boost::asio::post(strand_, [this, error] () {
-    //                     for (auto& callback : readable_) {
-    //                         callback(error);
-    //                     }
-    //                     readable_.clear();
-    //                 });
-    //             });
-    //         }
-    //     });
-    // }
+        boost::asio::post(strand_, [this, cb = std::move(cb)] () {
+            readable_.emplace_back(std::move(cb));
+            if (readable_.size() == 1) {
+                socket_.async_wait(boost::asio::socket_base::wait_read, [this] (boost::system::error_code error) {
+                    boost::asio::post(strand_, [this, error] () {
+                        for (auto& callback : readable_) {
+                            (*callback)(error);
+                        }
+                        readable_.clear();
+                    });
+                });
+            }
+        });
+    }
 
-    // void on_writable(std::function<void (boost::system::error_code)> cb) {
-    //     boost::asio::post(strand_, [this, cb = std::move(cb)] () {
-    //         writable_.emplace_back(std::move(cb));
-    //         if (writable_.size() == 1) {
-    //             socket_.async_wait(boost::asio::socket_base::wait_write, [this] (boost::system::error_code error) {
-    //                 boost::asio::post(strand_, [this, error] () {
-    //                     for (auto& callback : writable_) {
-    //                         callback(error);
-    //                     }
-    //                     writable_.clear();
-    //                 });
-    //             });
-    //         }
-    //     });
-    // }
+    void on_writable(std::function<void (boost::system::error_code)> cb) {
+        boost::asio::post(strand_, [this, cb = std::move(cb)] () {
+            writable_.emplace_back(std::move(cb));
+            if (writable_.size() == 1) {
+                socket_.async_wait(boost::asio::socket_base::wait_write, [this] (boost::system::error_code error) {
+                    boost::asio::post(strand_, [this, error] () {
+                        for (auto& callback : writable_) {
+                            (*callback)(error);
+                        }
+                        writable_.clear();
+                    });
+                });
+            }
+        });
+    }
 
     void create_ssl(const endpoint_type& addr,
         const std::string& host, const application_protocol_list& alpn, bool nonblocking) {
@@ -120,6 +159,7 @@ public:
     : ctx_(ctx)
     , strand_(ex)
     , socket_(strand_)
+    , timer_(strand_)
     , ssl_(conn) {
 
         if (ssl_ != nullptr) {
@@ -131,6 +171,8 @@ public:
             } else {
                 socket_ = boost::asio::basic_datagram_socket<proto>{strand_, proto::v4(), fd};
             }
+            
+            start();
         }
     }
     ~connection_base() {

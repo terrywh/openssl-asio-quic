@@ -8,5 +8,6 @@
 #include <boost/asio/ssl/context.hpp>
 #include <boost/asio/ssl/error.hpp>
 #include <boost/asio/strand.hpp>
+#include <boost/asio/steady_timer.hpp>
 
 #endif // QUIC_DETAIL_ASIO_H

@@ -43,13 +43,19 @@ public:
 
     template <class MutableBufferSequence, class CompletionToken>
     auto async_read_some(const MutableBufferSequence& buffers, CompletionToken&& token) -> decltype(
-        boost::asio::async_compose<detail::read_some_impl<Protocol, Executor, MutableBufferSequence>,
-                void (boost::system::error_code, std::size_t)>(
+        boost::asio::async_compose<
+            CompletionToken,
+            void (boost::system::error_code, std::size_t),
+            detail::read_some_impl<Protocol, Executor, MutableBufferSequence>>(
             std::declval<detail::read_some_impl<Protocol, Executor, MutableBufferSequence>>(),
             token)) {
-        return  boost::asio::async_compose<detail::read_some_impl<Protocol, Executor, MutableBufferSequence>,
-                void (boost::system::error_code, std::size_t)>(
-            detail::read_some_impl<Protocol, Executor, MutableBufferSequence>{this->conn_, *this, buffers},
+        
+                // detail::read_some_impl<Protocol, Executor, MutableBufferSequence> x{this->conn_, *this, buffers, 0, 0}; 
+        return  boost::asio::async_compose<
+                CompletionToken,
+                void (boost::system::error_code, std::size_t),
+                detail::read_some_impl<Protocol, Executor, MutableBufferSequence>>(
+            detail::read_some_impl<Protocol, Executor, MutableBufferSequence>{this->conn_, *this, buffers, 0, 0},
             token);
     }
 

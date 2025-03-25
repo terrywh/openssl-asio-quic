@@ -15,12 +15,40 @@ struct read_some_impl {
 
     connection_type& conn_;
     stream_type& stream_;
-    mutable_buffers_type& buffers_;
+    const mutable_buffers_type& buffers_;
+    int index_;
+    std::size_t total_;
 
-    enum {starting, connecting, configuring, handshaking, done} state_;
+    // enum {starting, connecting, configuring, handshaking, done} state_;
     template <typename Self>
-    void operator()(Self& self, boost::system::error_code error = {}) {
-       
+    void operator()(Self& self, boost::system::error_code error = {}, std::size_t size = 0) {
+        boost::asio::mutable_buffer buffer;
+        int idx = 0;
+        for (auto i=boost::asio::buffer_sequence_begin(buffers_); i!=boost::asio::buffer_sequence_end(buffers_); ++i) {
+            if (++idx == index_) {
+                buffer = *i;
+                break;
+            }
+        }
+    
+        if (int r = SSL_read_ex(stream_.ssl_, buffer.data(), buffer.size(), &size); r <= 0) {
+            int err = SSL_get_error(stream_.ssl_, r);
+            if (err == SSL_ERROR_WANT_READ) {
+                conn_.on_readable(std::move(self));
+            } else if (err == SSL_ERROR_WANT_WRITE) {
+                conn_.on_writable(std::move(self));
+            } else {
+                self.complete(boost::system::error_code{err, boost::asio::error::get_ssl_category()}, total_);
+            }
+            return;
+        }
+        total_ += size;
+        if (size != buffer.size() || total_ >= boost::asio::buffer_size(buffers_)) {
+            self.complete(error, total_);
+            return;
+        }
+        ++index_;
+        std::move(self)(error, size); // continue reading
     }
 };
 

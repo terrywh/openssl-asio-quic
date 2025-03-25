@@ -8,8 +8,12 @@ namespace detail {
 
 template <class Protocol, class Executor>
 class stream_base {
+    template <class Protocol1, class Executor1, class MutableBufferSequence>
+    friend struct read_some_impl;
+
 public:
     using connection_type = connection_base<Protocol, Executor>;
+    using socket_type = boost::asio::basic_datagram_socket<Protocol, Executor>;
 protected:
     connection_type& conn_;
     SSL* ssl_;
