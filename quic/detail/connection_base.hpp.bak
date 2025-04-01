@@ -6,50 +6,26 @@
 #include "../alpn.hpp"
 #include "../basic_endpoint.hpp"
 #include "../proto.hpp"
+#include "operation.hpp"
 
-#include <proxy.h>
 #include <chrono>
-#include <vector>
 
 namespace quic {
 namespace detail {
 
 template <class Protocol, class Executor>
 class connection_base {
-    template <class Protocol1, class Executor1>
-    friend class stream_base;
-    template <class Protocol1, class Executor1>
-    friend class connect_impl;
-    template <class Protocol1, class Executor1>
-    friend class create_stream_impl;
-    template <class Protocol1, class Executor1>
-    friend class accept_stream_impl;
-
-    template <class Protocol1, class Executor1, class MutableBufferSequence>
-    friend struct read_some_impl;
-
 public:
+    template <class Protocol1, class Executor1>
+    friend class connect_op;
+
     
-    using endpoint_type = basic_endpoint<Protocol>;
-    struct Callback : pro::facade_builder
-        ::add_convention<pro::operator_dispatch<"()">, void(boost::system::error_code)>
-        ::support_view
-        ::build {};
-    using callback_type = pro::proxy<Callback>;
 
-    using socket_type = boost::asio::basic_datagram_socket<Protocol, Executor>;
 
-protected:
-    boost::asio::ssl::context& ctx_;
-    boost::asio::strand<Executor> strand_;
-    socket_type socket_;
-    boost::asio::steady_timer timer_;
     
-    SSL* ssl_ = nullptr;
+    
+    
 
-private:
-    std::vector<callback_type> readable_;
-    std::vector<callback_type> writable_;
 
     void start() {
         if (!SSL_handle_events(ssl_)) {
@@ -79,77 +55,56 @@ private:
         // });
     }
 
-protected:
-    void on_readable(callback_type cb) {
 
-
-        boost::asio::post(strand_, [this, cb = std::move(cb)] () {
-            readable_.emplace_back(std::move(cb));
+    void on_readable(operation op) {
+        boost::asio::post(strand_, [this, op = std::move(op)] () {
+            // readable_.emplace_back(std::move(op));
             if (readable_.size() == 1) {
                 socket_.async_wait(boost::asio::socket_base::wait_read, [this] (boost::system::error_code error) {
-                    boost::asio::post(strand_, [this, error] () {
-                        for (auto& callback : readable_) {
-                            (*callback)(error);
+                    // boost::asio::post(strand_, [this, error] () {
+                        for (auto& op: readable_) {
+                            op(error);
                         }
                         readable_.clear();
-                    });
+                    // });
                 });
             }
         });
     }
 
-    void on_writable(std::function<void (boost::system::error_code)> cb) {
-        boost::asio::post(strand_, [this, cb = std::move(cb)] () {
-            writable_.emplace_back(std::move(cb));
+    void on_writable(operation op) {
+        boost::asio::post(strand_, [this, op = std::move(op)] () {
+            // writable_.emplace_back(std::move(op));
             if (writable_.size() == 1) {
                 socket_.async_wait(boost::asio::socket_base::wait_write, [this] (boost::system::error_code error) {
-                    boost::asio::post(strand_, [this, error] () {
-                        for (auto& callback : writable_) {
-                            (*callback)(error);
+                    // boost::asio::post(strand_, [this, error] () {
+                        for (auto& op : writable_) {
+                            op(error);
                         }
                         writable_.clear();
-                    });
+                    // });
                 });
             }
         });
     }
 
-    void create_ssl(const endpoint_type& addr,
-        const std::string& host, const application_protocol_list& alpn, bool nonblocking) {
-        BOOST_ASSERT(socket_.is_open());
-    
-        BIO* bio = BIO_new(BIO_s_datagram());
-        BIO_set_fd(bio, socket_.native_handle(), BIO_NOCLOSE);
+   
 
-        ssl_ = SSL_new(ctx_.native_handle());
-        SSL_set_bio(ssl_, bio, bio);
-        
-        SSL_set_default_stream_mode(ssl_, SSL_DEFAULT_STREAM_MODE_NONE);
-       
+    template <class Handler>
+    void handle_error(int r, Handler&& h) {
+        int err = SSL_get_error(this->ssl_, r);
 
-        SSL_set_tlsext_host_name(ssl_, host.c_str());
-        SSL_set1_host(ssl_, host.c_str());
-        SSL_set_alpn_protos(ssl_, alpn, alpn.size());
-        SSL_set1_initial_peer_addr(ssl_, addr);
-
-        if (nonblocking) {
-            socket_.native_non_blocking(true);
-            SSL_set_blocking_mode(ssl_, 0);
-        }
-    }
-
-    template <class Self>
-    void handle_ssl_error(int err, Self&& self) {
         switch (err) {
         case SSL_ERROR_WANT_READ:
-            this->socket_.async_wait(boost::asio::socket_base::wait_read, std::move(self));
-            // socket_.on_readable(socket_type::wait_read, std::move(self));
+            on_readable(make_operation(std::move(h)));
             break;
         case SSL_ERROR_WANT_WRITE:
-            this->socket_.async_wait(boost::asio::socket_base::wait_write, std::move(self));
+            on_writable(make_operation(std::move(h)));
             break;
         default:
-            self.complete(boost::system::error_code{err, boost::asio::error::get_ssl_category()});
+            boost::asio::post(strand_, [err, h = std::move(h)] () mutable {
+                std::move(h)(boost::system::error_code{err, boost::asio::error::get_ssl_category()});
+            });
         }
     }
 
@@ -182,6 +137,9 @@ public:
     boost::asio::strand<Executor>& get_executor() {
         return strand_;
     }
+
+
+    
 };
 
 } // namespace detail

@@ -5,6 +5,11 @@
 #include <boost/function.hpp>
 #include <iostream>
 
+static std::string payload {
+    "GET /hello HTTP/1.0\r\n"
+    "Host: localhost\r\n"
+    "\r\n"
+};
 
 boost::asio::awaitable<void> run(boost::asio::io_context& io) {
     boost::asio::ssl::context ctx {SSL_CTX_new(OSSL_QUIC_client_method())};
@@ -12,7 +17,7 @@ boost::asio::awaitable<void> run(boost::asio::io_context& io) {
     ctx.set_default_verify_paths();
 
     quic::application_protocol_list alpn {"http/1.0"};
-    quic::connection conn {io.get_executor(), ctx};
+    quic::connection conn {ctx, io.get_executor()};
 
     for (quic::endpoint addr : quic::resolve("localhost", "8443")) {
         std::cout << addr.to_string() << '\n';
@@ -22,48 +27,53 @@ boost::asio::awaitable<void> run(boost::asio::io_context& io) {
         // } catch(const std::exception& ex) {
         //     continue;
         // } 
-        co_await conn.async_connect("localhost", addr, alpn, boost::asio::use_awaitable);
+        std::cout << "before connect\n";
+        try {
+            co_await conn.async_connect("localhost", addr, alpn, boost::asio::use_awaitable);
+        }catch(std::exception& ex) {
+            std::cout << "exception1: " << ex.what() << "\n";
+        }
+        std::cout << "after connect\n";
         break;
     }
     
-    std::cout << "connection: \n";
+    std::cout << "------------------- connection ------------------------\n";
     ERR_print_errors_fp(stderr);
+    std::cout << "-------------------------------------------------------\n";
 
+    // try {
+    //     quic::stream stream = conn.create_stream();
+    //     std::cout << "stream: \n";
 
-    std::string payload {
-        "GET /hello HTTP/1.0\r\n"
-        "Host: localhost\r\n"
-        "\r\n"
-    };
+    //     std::size_t size = stream.write_some(boost::asio::buffer(payload));
+    //     std::cout << "write: \n";
+    //     stream.shutdown(boost::asio::socket_base::shutdown_send);
 
-    try {
-        quic::stream stream = conn.create_stream();
-        std::cout << "stream: \n";
+    //     payload.resize(1024);
+    //     size = stream.read_some(boost::asio::buffer(payload));
+    //     payload.resize(size);
+    //     std::cout << "read: (" << size << ")\n";
 
-        std::size_t size = stream.write_some(boost::asio::buffer(payload));
-        std::cout << "write: \n";
-        stream.shutdown(boost::asio::socket_base::shutdown_send);
+    //     std::cout << payload << "\n";
+    // } catch(const std::runtime_error& ex) {
+    //     std::cout << "------------------- exception -------------------------\n";
+    //     std::cout << ex.what() << "\n";
+    //     ERR_print_errors_fp(stderr);
+    //     std::cout << "-------------------------------------------------------\n";
+    //     goto DONE;
+    // }
 
-        payload.resize(1024);
-        size = co_await stream.async_read_some(boost::asio::buffer(payload), boost::asio::use_awaitable);
-        payload.resize(size);
-        std::cout << "read: (" << size << ")\n";
-
-        std::cout << payload << "\n";
-    } catch(const std::runtime_error& ex) {
-        std::cout << "exception: " << ex.what() << "\n";
-        goto ERROR;
-    }
-
-ERROR:
-    ERR_print_errors_fp(stderr);
-    std::cout << "done.\n";
+DONE:
+    co_return;
 }
 
 
 int main(int argc, char* argv[]) {
     boost::asio::io_context io;
+
     boost::asio::co_spawn(io, run(io), boost::asio::detached);
     io.run();
+    std::cout << "done.\n";
+
     return 0;
 }

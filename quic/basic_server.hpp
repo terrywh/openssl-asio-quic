@@ -1,13 +1,9 @@
 #ifndef ASIO_QUIC_BASIC_SERVER_H
 #define ASIO_QUIC_BASIC_SERVER_H
 
-#include "detail/openssl.hpp"
+#include "detail/ssl.hpp"
+#include "detail/asio.hpp"
 #include "basic_connection.hpp"
-#include <boost/system.hpp>
-#include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/ip/udp.hpp>
-#include <boost/asio/ip/basic_endpoint.hpp>
-#include <boost/asio/ssl/context.hpp>
 
 namespace quic {
 

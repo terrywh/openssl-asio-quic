@@ -8,7 +8,7 @@ namespace quic {
 namespace detail {
 
 template <class Protocol, class Executor, class MutableBufferSequence>
-struct read_some_impl {
+struct read_some_op {
     using connection_type = connection_base<Protocol, Executor>;
     using stream_type = stream_base<Protocol, Executor>;
     using mutable_buffers_type = typename std::decay<MutableBufferSequence>::type;

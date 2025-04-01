@@ -3,7 +3,6 @@
 
 #include "proto.hpp"
 #include "basic_endpoint.hpp"
-#include <boost/asio/ssl/error.hpp>
 
 namespace quic {
 

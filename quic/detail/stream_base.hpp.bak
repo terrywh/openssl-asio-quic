@@ -24,7 +24,7 @@ public:
     , ssl_(s) {}
 };
 
-}
-}
+} // namespace detail
+} // namespace quic
 
 #endif // QUIC_DETAIL_STREAM_BASE_H

@@ -9,7 +9,7 @@ namespace quic {
 namespace detail {
 
 template <class Protocol, class Executor>
-struct connect_impl {
+struct connect_op {
     connection_base<Protocol, Executor>& conn_;
     const basic_endpoint<Protocol>&  addr_;
     const std::string& host_;
@@ -40,8 +40,7 @@ CONTINUE:
                 return;
             }
             if (int r = SSL_connect(conn_.ssl_); r <= 0) {
-                int err = SSL_get_error(conn_.ssl_, r);
-                conn_.handle_ssl_error(err, std::move(self));
+                conn_.handle_error(r, std::move(self));
             } else {
                 self.complete(error);
             }

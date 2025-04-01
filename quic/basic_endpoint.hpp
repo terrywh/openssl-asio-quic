@@ -1,8 +1,8 @@
 #ifndef QUIC_BASIC_ENDPOING_H
 #define QUIC_BASIC_ENDPOING_H
 
-#include "detail/openssl.hpp"
-#include <boost/asio/ip/address.hpp>
+#include "detail/asio.hpp"
+#include "detail/ssl.hpp"
 #include <format>
 
 namespace quic {

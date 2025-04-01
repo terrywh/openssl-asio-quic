@@ -11,7 +11,7 @@ void run(boost::asio::io_context& io) {
     ctx.set_default_verify_paths();
 
     quic::application_protocol_list alpn {"http/1.0"};
-    quic::connection conn {io.get_executor(), ctx};
+    quic::connection conn {ctx, io.get_executor()};
 
     for (quic::endpoint addr : quic::resolve("localhost", "8443")) {
         std::cout << addr.to_string() << '\n';
@@ -24,8 +24,9 @@ void run(boost::asio::io_context& io) {
         break;
     }
     
-    std::cout << "connection: \n";
+    std::cout << "------------------- connection -----------------\n";
     ERR_print_errors_fp(stderr);
+    std::cout << "------------------------------------------------\n";
 
 
     std::string payload {
@@ -49,12 +50,14 @@ void run(boost::asio::io_context& io) {
 
         std::cout << payload << "\n";
     } catch(const std::runtime_error& ex) {
-        std::cout << "exception: " << ex.what() << "\n";
-        goto ERROR;
+        std::cout << "------------------- exception -------------------------\n";
+        std::cout << ex.what() << "\n";
+        ERR_print_errors_fp(stderr);
+        std::cout << "-------------------------------------------------------\n";
+        goto DONE;
     }
 
-ERROR:
-    ERR_print_errors_fp(stderr);
+DONE:
     std::cout << "done.\n";
 }
 
