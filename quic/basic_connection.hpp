@@ -32,6 +32,7 @@ private:
 
     std::vector<detail::operation_wrapper> readable_;
     std::vector<detail::operation_wrapper> writable_;
+    std::vector<detail::operation_wrapper> timeouts_;
     
 
     template <class ExecutorContext>
@@ -54,6 +55,7 @@ private:
 
         if (nonblocking)
             socket_.native_non_blocking(true);
+            // BIO_socket_nbio(socket_.native_handle(), 1);
 
 
         ssl_ = SSL_new(ctx_.native_handle());
@@ -62,7 +64,6 @@ private:
 
         BIO* bio = BIO_new(BIO_s_datagram());
         BIO_set_fd(bio, socket_.native_handle(), BIO_NOCLOSE);
-
         SSL_set_bio(ssl_, bio, bio);
 
         SSL_set_tlsext_host_name(ssl_, host.c_str());
@@ -74,51 +75,87 @@ private:
             SSL_set_blocking_mode(ssl_, 0);
     }
 
+    void on_timeout(std::chrono::steady_clock::duration us, detail::operation_wrapper&& op) {
+        boost::asio::post(strand_, [this, us, op = std::move(op)] () mutable {
+            timeouts_.push_back(std::move(op));
+            if (timeouts_.size() == 1) {
+                timer_.expires_after(us);
+                timer_.async_wait(boost::asio::bind_executor(strand_, [this] (boost::system::error_code error) {
+                    if (!error) for (auto& cb : timeouts_) {
+                        std::move(cb)(error);
+                    }
+                    timeouts_.clear();
+                }));
+            }
+            return;
+        });
+    }
 
-
-    void on_readable(detail::operation_wrapper&& op) {
+    void on_waitable(detail::operation_wrapper&& op) {
         boost::asio::post(strand_, [this, op = std::move(op)] () mutable {
-            readable_.push_back(std::move(op));
-            if (readable_.size() == 1) {
-                socket_.async_wait(boost::asio::socket_base::wait_read, boost::asio::bind_executor(strand_, 
-                    [this] (boost::system::error_code error) {
-                        for (auto& rop: readable_) {
-                            std::move(rop)(error);
-                        }
-                        readable_.clear();
-                    }));
+            if (SSL_net_write_desired(ssl_)) {
+                std::cout << std::chrono::system_clock::now() << " writable await\n";
+                writable_.push_back(std::move(op));
+                if (writable_.size() == 1) {
+                    socket_.async_wait(boost::asio::socket_base::wait_write, boost::asio::bind_executor(strand_, 
+                        [this] (boost::system::error_code error) {
+                            for (auto& wop : writable_) {
+                                std::move(wop)(error);
+                            }
+                            writable_.clear();
+                        }));
+                }
+                return;
+            }
+            
+            if (SSL_net_read_desired(ssl_)) {
+                std::cout << std::chrono::system_clock::now() << " readable push\n";
+                readable_.push_back(std::move(op));
+                if (readable_.size() == 1) {
+                    std::cout << std::chrono::system_clock::now() << " readable await\n";
+                    socket_.async_wait(boost::asio::socket_base::wait_read, boost::asio::bind_executor(strand_, 
+                        [this] (boost::system::error_code error) {
+                            for (auto& rop: readable_) {
+                                std::move(rop)(error);
+                            }
+                            readable_.clear();
+                        }));
+                }
+                return;
             }
         });
     }
 
-    void on_writable(detail::operation_wrapper&& op) {
-        boost::asio::post(strand_, [this, op = std::move(op)] () mutable {
-            writable_.push_back(std::move(op));
-            if (writable_.size() == 1) {
-                socket_.async_wait(boost::asio::socket_base::wait_write, boost::asio::bind_executor(strand_, 
-                    [this] (boost::system::error_code error) {
-                        for (auto& wop : writable_) {
-                            std::move(wop)(error);
-                        }
-                        writable_.clear();
-                    }));
-            }
-        });
-    }
 
+    std::chrono::steady_clock::duration get_timeout() {
+        struct timeval tv;
+        int isinfinite;
+        std::chrono::microseconds us { 0 };
+        if (SSL_get_event_timeout(ssl_, &tv, &isinfinite) && !isinfinite) 
+            us = std::chrono::microseconds(tv.tv_usec + tv.tv_sec * 1000000);
+        
+        return us > std::chrono::milliseconds(10) ? std::chrono::microseconds(0) : us;
+    }
    
 
     template <class Handler>
     void handle_error(int r, Handler&& h) {
         int err = SSL_get_error(this->ssl_, r);
+        std::cout << std::chrono::system_clock::now() << " handle (result = " << r << " error = " << err << ")\n";
         detail::operation_wrapper op { detail::operation<Handler, std::allocator<std::byte>>::create(std::move(h)) };
 
         switch (err) {
         case SSL_ERROR_WANT_READ:
-            on_readable(std::move(op));
-            break;
-        case SSL_ERROR_WANT_WRITE:
-            on_writable(std::move(op));
+            [[fallthrough]];
+        case SSL_ERROR_WANT_WRITE: {
+            if (auto us = get_timeout(); us > std::chrono::microseconds(0)) {
+                on_timeout(us, std::move(op));
+            } else {
+                on_waitable(std::move(op));
+            }
+        }   
+            
+            
             break;
         default:
             boost::asio::post(strand_, [err, op = std::move(op)] () mutable {
@@ -165,7 +202,6 @@ public:
             struct connect_impl {
                 using handler_type = typename std::decay<decltype(handler)>::type;
                 handler_type handler_;
-                boost::asio::executor_work_guard<Executor> guard_;
                 basic_connection<Protocol, Executor>& conn_;
                 const endpoint_type& addr_;
                 const std::string& host_;
@@ -175,7 +211,6 @@ public:
                 connect_impl(handler_type&& handler, basic_connection<Protocol, Executor>& conn,
                     const endpoint_type& addr, const std::string& host, application_protocol_list& alpn)
                 : handler_(std::move(handler))
-                , guard_(conn.get_executor())
                 , conn_(conn)
                 , addr_(addr)
                 , host_(host)
@@ -187,7 +222,6 @@ public:
                 connect_impl(const connect_impl& impl) = delete;
                 connect_impl(connect_impl&& impl) = default;
                 // : handler_(std::move(impl.handler_))
-                // , guard_(std::move(impl.guard_))
                 // , conn_(impl.conn_)
                 // , addr_(impl.addr_)
                 // , host_(impl.host_)
@@ -213,7 +247,6 @@ public:
                             return;
                         }
                         BOOST_ASSERT(conn_.socket_.is_open());
-                        ERR_clear_error();
                         if (int r = SSL_connect(conn_.ssl_); r != 1) {
                             conn_.handle_error(r, std::move(*this));
                         } else {

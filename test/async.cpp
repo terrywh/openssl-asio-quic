@@ -27,13 +27,13 @@ boost::asio::awaitable<void> run(boost::asio::io_context& io) {
         // } catch(const std::exception& ex) {
         //     continue;
         // } 
-        std::cout << "before connect\n";
+        std::cout << std::chrono::system_clock::now() << " before connect\n";
         try {
             co_await conn.async_connect("localhost", addr, alpn, boost::asio::use_awaitable);
         }catch(std::exception& ex) {
             std::cout << "exception1: " << ex.what() << "\n";
         }
-        std::cout << "after connect\n";
+        std::cout << std::chrono::system_clock::now() << " after connect\n";
         break;
     }
     
