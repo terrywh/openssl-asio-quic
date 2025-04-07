@@ -16,7 +16,8 @@ template <class Protocol, class Executor = boost::asio::any_io_executor>
 class basic_connection {
 public:
     using protocol_type = typename std::decay<Protocol>::type;
-    using executor_type = typename std::decay<Executor>::type;
+    // using executor_type = typename std::decay<Executor>::type;
+    using executor_type = boost::asio::strand<Executor>;
     using endpoint_type = basic_endpoint<Protocol>;
     using socket_type = boost::asio::basic_datagram_socket<Protocol, Executor>;
     using stream_type = basic_stream<Protocol, Executor>;
@@ -33,10 +34,10 @@ private:
     std::vector<detail::operation_wrapper> writable_;
     
 
-    template <class Executor1>
-    basic_connection(boost::asio::ssl::context& ctx, const Executor1& ex, SSL* conn)
+    template <class ExecutorContext>
+    basic_connection(boost::asio::ssl::context& ctx, ExecutorContext& ex, SSL* conn)
     : ctx_(ctx) 
-    , strand_(ex) 
+    , strand_(ex.get_executor()) 
     , timer_(strand_) 
     , socket_(strand_)
     , ssl_(conn) {
@@ -50,25 +51,27 @@ private:
     void create_ssl(const endpoint_type& addr,
         const std::string& host, const application_protocol_list& alpn, bool nonblocking) {
         BOOST_ASSERT(socket_.is_open());
-    
+
+        if (nonblocking)
+            socket_.native_non_blocking(true);
+
+
+        ssl_ = SSL_new(ctx_.native_handle());
+        SSL_set_default_stream_mode(ssl_, SSL_DEFAULT_STREAM_MODE_NONE);
+
+
         BIO* bio = BIO_new(BIO_s_datagram());
         BIO_set_fd(bio, socket_.native_handle(), BIO_NOCLOSE);
 
-        ssl_ = SSL_new(ctx_.native_handle());
         SSL_set_bio(ssl_, bio, bio);
-        
-        SSL_set_default_stream_mode(ssl_, SSL_DEFAULT_STREAM_MODE_NONE);
-       
 
         SSL_set_tlsext_host_name(ssl_, host.c_str());
         SSL_set1_host(ssl_, host.c_str());
         SSL_set_alpn_protos(ssl_, alpn, alpn.size());
         SSL_set1_initial_peer_addr(ssl_, addr);
 
-        if (nonblocking) {
-            socket_.native_non_blocking(true);
+        if (nonblocking)
             SSL_set_blocking_mode(ssl_, 0);
-        }
     }
 
 
@@ -107,17 +110,8 @@ private:
 
     template <class Handler>
     void handle_error(int r, Handler&& h) {
-        struct defer {
-            defer () {
-                std::cout << "handle_error start:\n";
-            }
-            ~defer () {
-                std::cout << "handle_error end\n";
-            }
-        } defer;
-        detail::operation_wrapper op { detail::operation<Handler, std::allocator<std::byte>>::create(std::move(h)) };
-
         int err = SSL_get_error(this->ssl_, r);
+        detail::operation_wrapper op { detail::operation<Handler, std::allocator<std::byte>>::create(std::move(h)) };
 
         switch (err) {
         case SSL_ERROR_WANT_READ:
@@ -136,13 +130,17 @@ private:
 
 
 public:
-    template <class Executor1>
-    basic_connection(boost::asio::ssl::context& ctx, const Executor1& ex)
-    : basic_connection(ctx, ex, nullptr) {
+    template <class ExecutorContext>
+    basic_connection(boost::asio::ssl::context& ctx, ExecutorContext& context)
+    : basic_connection(ctx, context, nullptr) {
     }
 
     ~basic_connection() {
         std::cout << "connection destroy\n";
+    }
+
+    executor_type get_executor() {
+        return strand_;
     }
 
     void connect(const endpoint_type& addr, const std::string& host, application_protocol_list& alpn) {
@@ -167,37 +165,36 @@ public:
             struct connect_impl {
                 using handler_type = typename std::decay<decltype(handler)>::type;
                 handler_type handler_;
+                boost::asio::executor_work_guard<Executor> guard_;
                 basic_connection<Protocol, Executor>& conn_;
                 const endpoint_type& addr_;
                 const std::string& host_;
                 application_protocol_list& alpn_;
+                enum {starting, creating, handshaking, done} state_;
                 
                 connect_impl(handler_type&& handler, basic_connection<Protocol, Executor>& conn,
                     const endpoint_type& addr, const std::string& host, application_protocol_list& alpn)
                 : handler_(std::move(handler))
+                , guard_(conn.get_executor())
                 , conn_(conn)
                 , addr_(addr)
                 , host_(host)
-                , alpn_(alpn) {
+                , alpn_(alpn)
+                , state_(starting) {
 
-                    std::cout << "connect_impl +++\n";
                 }
 
                 connect_impl(const connect_impl& impl) = delete;
-                connect_impl(connect_impl&& impl)
-                : handler_(std::move(impl.handler_))
-                , conn_(impl.conn_)
-                , addr_(impl.addr_)
-                , host_(impl.host_)
-                , alpn_(impl.alpn_) {
-                    std::cout << "connect_impl ===\n";
-                }
+                connect_impl(connect_impl&& impl) = default;
+                // : handler_(std::move(impl.handler_))
+                // , guard_(std::move(impl.guard_))
+                // , conn_(impl.conn_)
+                // , addr_(impl.addr_)
+                // , host_(impl.host_)
+                // , alpn_(impl.alpn_)
+                // , state_(impl.state_) {}
 
-                ~connect_impl() {
-                    std::cout << "connect_impl ---\n";
-                }
-
-                enum {starting, creating, handshaking, done} state_ = starting;
+                // ~connect_impl() {}
 
                 void operator()(boost::system::error_code error) {
                         
@@ -210,14 +207,19 @@ public:
                         // break;
                     case handshaking:
                         if (error) {
-                            handler_(error);
+                            boost::asio::post(conn_.get_executor(), [handler = std::move(handler_), err = error] () mutable {
+                                std::move(handler)(err);
+                            });
                             return;
                         }
                         BOOST_ASSERT(conn_.socket_.is_open());
-                        if (int r = SSL_connect(conn_.ssl_); r <= 0) {
+                        ERR_clear_error();
+                        if (int r = SSL_connect(conn_.ssl_); r != 1) {
                             conn_.handle_error(r, std::move(*this));
                         } else {
-                            std::move(handler_)(error);
+                            boost::asio::post(conn_.get_executor(), [handler = std::move(handler_), err = error] () mutable {
+                                std::move(handler)(err);
+                            });
                         }
                         
                     }

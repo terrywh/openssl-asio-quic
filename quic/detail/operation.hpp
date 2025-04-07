@@ -76,12 +76,12 @@ struct operation_wrapper {
     operation_base* op;
     explicit operation_wrapper(operation_base* op)
     : op(op) {
-        std::cout << "operation create1: " << this << "\n";
+        // std::cout << "operation create1: " << this << "\n";
     }
     operation_wrapper(const operation_wrapper& o) = delete;
     operation_wrapper(operation_wrapper&& o) noexcept
     : op(std::exchange(o.op, nullptr)) {
-        std::cout << "operation create2: " << this << "\n";
+        // std::cout << "operation create2: " << this << "\n";
     }
 
 
@@ -97,7 +97,7 @@ struct operation_wrapper {
     }
 
     ~operation_wrapper() {
-        std::cout << "operation destroy: " << this << "\n";
+        // std::cout << "operation destroy: " << this << "\n";
         if (op != nullptr) {
             op->execute(operation_base::action::destroy);
             op = nullptr;
