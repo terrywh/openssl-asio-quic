@@ -30,9 +30,7 @@ private:
     SSL* ssl_;
 
 
-    std::vector<detail::operation_wrapper> readable_;
-    std::vector<detail::operation_wrapper> writable_;
-    std::vector<detail::operation_wrapper> timeouts_;
+    std::vector<detail::operation_wrapper> waitable_;
     
 
     template <class ExecutorContext>
@@ -42,8 +40,7 @@ private:
     , timer_(strand_) 
     , socket_(strand_)
     , ssl_(conn) {
-        readable_.reserve(8);
-        writable_.reserve(8);
+        waitable_.reserve(8);
     }
 
     basic_connection(basic_connection&& conn) = delete;
@@ -75,53 +72,43 @@ private:
             SSL_set_blocking_mode(ssl_, 0);
     }
 
-    void on_timeout(std::chrono::steady_clock::duration us, detail::operation_wrapper&& op) {
-        boost::asio::post(strand_, [this, us, op = std::move(op)] () mutable {
-            timeouts_.push_back(std::move(op));
-            if (timeouts_.size() == 1) {
-                timer_.expires_after(us);
-                timer_.async_wait(boost::asio::bind_executor(strand_, [this] (boost::system::error_code error) {
-                    if (!error) for (auto& cb : timeouts_) {
-                        std::move(cb)(error);
-                    }
-                    timeouts_.clear();
-                }));
-            }
-            return;
+    void on_timeout(std::chrono::steady_clock::duration us) {
+        boost::asio::post(strand_, [this, us] () mutable {
+            timer_.expires_after(us);
+            timer_.async_wait(boost::asio::bind_executor(strand_, [this] (boost::system::error_code error) {
+                if (error) return;
+                socket_.cancel();
+            }));
         });
     }
 
     void on_waitable(detail::operation_wrapper&& op) {
         boost::asio::post(strand_, [this, op = std::move(op)] () mutable {
-            if (SSL_net_write_desired(ssl_)) {
-                std::cout << std::chrono::system_clock::now() << " writable await\n";
-                writable_.push_back(std::move(op));
-                if (writable_.size() == 1) {
+            int w = SSL_net_write_desired(ssl_),
+                r = SSL_net_read_desired(ssl_);
+
+            if (r || w) {
+                waitable_.push_back(std::move(op));
+                
+                if (waitable_.size() == 1 && w)
                     socket_.async_wait(boost::asio::socket_base::wait_write, boost::asio::bind_executor(strand_, 
                         [this] (boost::system::error_code error) {
-                            for (auto& wop : writable_) {
-                                std::move(wop)(error);
+                            if (error == boost::asio::error::operation_aborted) error = {};
+                            for (auto& op : waitable_) {
+                                std::move(op)(error);
                             }
-                            writable_.clear();
+                            waitable_.clear();
                         }));
-                }
-                return;
-            }
-            
-            if (SSL_net_read_desired(ssl_)) {
-                std::cout << std::chrono::system_clock::now() << " readable push\n";
-                readable_.push_back(std::move(op));
-                if (readable_.size() == 1) {
-                    std::cout << std::chrono::system_clock::now() << " readable await\n";
+                
+                if (waitable_.size() == 1 && r)
                     socket_.async_wait(boost::asio::socket_base::wait_read, boost::asio::bind_executor(strand_, 
                         [this] (boost::system::error_code error) {
-                            for (auto& rop: readable_) {
-                                std::move(rop)(error);
+                            if (error == boost::asio::error::operation_aborted) error = {};
+                            for (auto& op: waitable_) {
+                                std::move(op)(error);
                             }
-                            readable_.clear();
+                            waitable_.clear();
                         }));
-                }
-                return;
             }
         });
     }
@@ -134,7 +121,7 @@ private:
         if (SSL_get_event_timeout(ssl_, &tv, &isinfinite) && !isinfinite) 
             us = std::chrono::microseconds(tv.tv_usec + tv.tv_sec * 1000000);
         
-        return us > std::chrono::milliseconds(10) ? std::chrono::microseconds(0) : us;
+        return us < std::chrono::milliseconds(8) ? us : std::chrono::microseconds(0);
     }
    
 
@@ -147,14 +134,10 @@ private:
         switch (err) {
         case SSL_ERROR_WANT_READ:
             [[fallthrough]];
-        case SSL_ERROR_WANT_WRITE: {
-            if (auto us = get_timeout(); us > std::chrono::microseconds(0)) {
-                on_timeout(us, std::move(op));
-            } else {
-                on_waitable(std::move(op));
-            }
-        }   
-            
+        case SSL_ERROR_WANT_WRITE:
+            on_waitable(std::move(op));
+            if (auto us = get_timeout(); us > std::chrono::microseconds(0))
+                on_timeout(us);
             
             break;
         default:
