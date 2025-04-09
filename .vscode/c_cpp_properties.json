@@ -10,7 +10,10 @@
             "compilerPath": "/data/server/compiler/bin/clang++",
             "intelliSenseMode": "linux-clang-x64",
             "cStandard": "c23",
-            "cppStandard": "c++23"
+            "cppStandard": "c++23",
+            "compileCommands": [
+                "${workspaceFolder}/compile_commands.json"
+            ]
         }
     ],
     "version": 4
