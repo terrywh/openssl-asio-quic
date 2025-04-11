@@ -34,22 +34,25 @@ public:
     basic_connection(boost::asio::ssl::context& ctx, ExecutorContext& ex)
     : detail::connection_base<Protocol, Executor>(ctx, ex, static_cast<SSL*>(nullptr)) { }
 
+    ~basic_connection() {
+        std::cout << "~basic_connection\n";
+    }
+
     void connect(const endpoint_type& addr) {
         this->socket_.connect(addr);
         this->create_ssl(addr, false);
         // TLS 协议握手
         if (int r = SSL_connect(this->ssl_); r <= 0) {
+            SSL_free(this->ssl_);
+            this->ssl_ = nullptr;
             throw boost::system::system_error(SSL_get_error(this->ssl_, r), boost::asio::error::get_ssl_category());
         }
     }
 
     template <class CompletionToken>
     auto async_connect(const endpoint_type& addr, CompletionToken&& token) {
-
-        return boost::asio::async_initiate<CompletionToken, void (boost::system::error_code)>(
-            [] (auto&& handler, detail::connection_base<Protocol, Executor>& conn, const endpoint_type& addr) {
-                detail::do_connect{std::move(handler), conn, addr}({});
-            }, std::move(token), std::ref(*this), std::ref(addr));
+        return boost::asio::async_compose<CompletionToken, void (boost::system::error_code)>(
+            detail::do_async_connect{*this, addr}, token);
     }
 
     stream_type accept_stream() {

@@ -5,6 +5,7 @@
 #include "quic/basic_server.hpp"
 #include "quic/basic_connection.hpp"
 #include "quic/resolve.hpp"
+#include "quic/connect.hpp"
 
 namespace quic {
     using endpoint = quic::basic_endpoint<proto>;

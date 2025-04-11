@@ -1,4 +1,5 @@
 #include "../quic.hpp"
+#include <boost/asio/connect.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -14,16 +15,7 @@ void run(boost::asio::io_context& io) {
     conn.set_alpn(quic::application_protocol_list {"http/1.0"});
     conn.set_host("localhost");
 
-    for (quic::endpoint addr : quic::resolve("localhost", "8443")) {
-        std::cout << addr.to_string() << '\n';
-
-        try {
-            conn.connect(addr);
-        } catch(const std::exception& ex) {
-            continue;
-        } 
-        break;
-    }
+    quic::connect(conn, quic::resolve("localhost", "8443"));
     
     std::cout << "------------------- connection -----------------\n";
     ERR_print_errors_fp(stderr);

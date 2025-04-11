@@ -27,6 +27,11 @@ public:
     basic_endpoint(const basic_endpoint& e)
     : addr_(BIO_ADDR_dup(e.addr_)) {}
 
+    basic_endpoint(basic_endpoint&& e)
+    : addr_(BIO_ADDR_dup(e.addr_)) {
+        
+    }
+
     ~basic_endpoint() {
         if (addr_ != nullptr) BIO_ADDR_free(addr_);
     }    
@@ -80,13 +85,13 @@ class basic_endpoints {
 public:
     using protocol_type = typename std::decay<Protocol>::type;
     using port_type = std::uint16_t;
-
+    using value_type = basic_endpoint<Protocol>;
 
 private:
-    BIO_ADDRINFO* addr_;
+    std::shared_ptr<BIO_ADDRINFO> addr_;
 
     explicit basic_endpoints(BIO_ADDRINFO* addr)
-    : addr_(addr) {}
+    : addr_(addr, BIO_ADDRINFO_free) {}
 
 public:
     class iterator {
@@ -99,12 +104,17 @@ public:
         :i_(i) {}
 
     public:
-        constexpr iterator& operator ++() {
+        using difference_type = std::ptrdiff_t;
+        using value_type = basic_endpoint<Protocol>;
+        using reference = basic_endpoint<Protocol>&;
+        using iterator_category = std::forward_iterator_tag;
+
+        iterator& operator ++() {
             i_ = BIO_ADDRINFO_next(i_);
             return *this;
         }
 
-        constexpr iterator operator ++(int) {
+        constexpr iterator operator ++(int) const {
             return {BIO_ADDRINFO_next(i_)};
         }
 
@@ -112,17 +122,19 @@ public:
             return i_ != it.i_;
         }
 
-        basic_endpoint<Protocol> operator*() const {
+        constexpr bool operator == (const iterator& it) const {
+            return i_ == it.i_;
+        }
+
+        value_type operator*() const {
             return basic_endpoint<Protocol>{BIO_ADDR_dup(BIO_ADDRINFO_address(i_))};
         }
     };
 
-    ~ basic_endpoints() {
-        if (addr_ != nullptr) BIO_ADDRINFO_free(addr_);
-    }
+    basic_endpoints(const basic_endpoints& es) = default;
 
     iterator begin() const {
-        return iterator{addr_};
+        return iterator{addr_.get()};
     }
 
     iterator end() const {

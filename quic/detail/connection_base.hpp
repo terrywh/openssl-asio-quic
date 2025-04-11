@@ -15,14 +15,16 @@ namespace detail {
 
 template <class Protocol, class Executor>
 class connection_base {
-    template <class Protocol1, class Executor1, class CompleteToken>
-    friend class do_connect;
+    template <class Protocol1, class Executor1>
+    friend class do_async_connect;
+    template <class Protocol1, class Executor1, class EndpointSequence>
+    friend class do_async_connect_seq;
 
+    template <class Protocol1, class Executor1, class EndpointSequence>
+    friend class do_connect_seq;
 public:
-    using socket_type = boost::asio::basic_datagram_socket<Protocol, Executor>;
-    using protocol_type = typename std::decay<Protocol>::type;
     using executor_type = boost::asio::strand<Executor>;
-    using endpoint_type = basic_endpoint<Protocol>;
+    using endpoint_type = typename boost::asio::basic_socket<Protocol, Executor>::endpoint_type;
 
 
 private:
@@ -34,16 +36,16 @@ private:
 protected:
     boost::asio::ssl::context& ctx_;
     boost::asio::strand<Executor> strand_;
+    boost::asio::basic_datagram_socket<Protocol> socket_;
     boost::asio::steady_timer timer_;
-    socket_type socket_;
     SSL* ssl_;
 
     template <class ExecutorContext>
     connection_base(boost::asio::ssl::context& ctx, ExecutorContext& ex, SSL* conn)
     : ctx_(ctx) 
     , strand_(ex.get_executor()) 
+    , socket_(ex.get_executor())
     , timer_(strand_) 
-    , socket_(strand_)
     , ssl_(conn) {
         waitable_.reserve(8);
         alpn_ = application_protocol_list{"default/1"};
@@ -51,19 +53,17 @@ protected:
     }
 
     void create_ssl(const endpoint_type& addr, bool nonblocking) {
-        BOOST_ASSERT(socket_.is_open());
+        BOOST_ASSERT(this->socket_.is_open());
 
         if (nonblocking)
-            socket_.native_non_blocking(true);
-            // BIO_socket_nbio(socket_.native_handle(), 1);
-
+            this->socket_.native_non_blocking(true);
 
         ssl_ = SSL_new(ctx_.native_handle());
         SSL_set_default_stream_mode(ssl_, SSL_DEFAULT_STREAM_MODE_NONE);
 
 
         BIO* bio = BIO_new(BIO_s_datagram());
-        BIO_set_fd(bio, socket_.native_handle(), BIO_NOCLOSE);
+        BIO_set_fd(bio, this->socket_.native_handle(), BIO_NOCLOSE);
         SSL_set_bio(ssl_, bio, bio);
 
         SSL_set_tlsext_host_name(ssl_, host_.c_str());
@@ -80,7 +80,7 @@ protected:
             timer_.expires_after(us);
             timer_.async_wait(boost::asio::bind_executor(strand_, [this] (boost::system::error_code error) {
                 if (error) return;
-                socket_.cancel();
+                this->socket_.cancel();
             }));
         });
     }
@@ -94,7 +94,7 @@ protected:
                 waitable_.push_back(std::move(op));
                 
                 if (waitable_.size() == 1 && w)
-                    socket_.async_wait(boost::asio::socket_base::wait_write, boost::asio::bind_executor(strand_, 
+                    this->socket_.async_wait(boost::asio::socket_base::wait_write, boost::asio::bind_executor(strand_, 
                         [this] (boost::system::error_code error) {
                             if (error == boost::asio::error::operation_aborted) error = {};
                             for (auto& op : waitable_) {
@@ -104,7 +104,7 @@ protected:
                         }));
                 
                 if (waitable_.size() == 1 && r)
-                    socket_.async_wait(boost::asio::socket_base::wait_read, boost::asio::bind_executor(strand_, 
+                    this->socket_.async_wait(boost::asio::socket_base::wait_read, boost::asio::bind_executor(strand_, 
                         [this] (boost::system::error_code error) {
                             if (error == boost::asio::error::operation_aborted) error = {};
                             for (auto& op: waitable_) {
@@ -129,25 +129,21 @@ protected:
    
 
     template <class Handler>
-    void handle_error(int r, Handler&& h) {
+    boost::system::error_code handle_error(int r, Handler&& h) {
         int err = SSL_get_error(this->ssl_, r);
-        detail::operation_wrapper op { detail::operation<Handler, std::allocator<std::byte>>::create(std::move(h)) };
+        // detail::operation_wrapper op { detail::operation<Handler, std::allocator<std::byte>>::create(std::move(h)) };
 
         switch (err) {
         case SSL_ERROR_WANT_READ:
             [[fallthrough]];
         case SSL_ERROR_WANT_WRITE:
-            on_waitable(std::move(op));
-            if (auto us = get_timeout(); us > std::chrono::microseconds(0))
-                on_timeout(us);
-            
-            break;
+            // on_waitable(std::move(op));
+            // if (auto us = get_timeout(); us > std::chrono::microseconds(0))
+                on_timeout(std::chrono::milliseconds(1));
+            return {};
         default:
-            boost::asio::post(strand_, [err, op = std::move(op)] () mutable {
-                std::move(op)(boost::system::error_code{err, boost::asio::error::get_ssl_category()});
-            });
+            return {err, boost::asio::error::get_ssl_category()};
         }
-        
     }
 
 public:
@@ -162,6 +158,7 @@ public:
     executor_type get_executor() {
         return this->strand_;
     }
+
 };
 
 } // namespace detail

@@ -12,6 +12,8 @@ static std::string payload {
 };
 
 boost::asio::awaitable<void> run(boost::asio::io_context& io) {
+    quic::basic_endpoints<quic::proto>::iterator::difference_type x;
+
     boost::asio::ssl::context ctx {SSL_CTX_new(OSSL_QUIC_client_method())};
     ctx.set_verify_mode(boost::asio::ssl::context_base::verify_none);
     ctx.set_default_verify_paths();
@@ -20,23 +22,9 @@ boost::asio::awaitable<void> run(boost::asio::io_context& io) {
     conn.set_alpn(quic::application_protocol_list {"http/1.0"});
     conn.set_host("localhost");
 
-    for (quic::endpoint addr : quic::resolve("localhost", "8443")) {
-        std::cout << addr.to_string() << '\n';
 
-        // try {
-        //     conn.connect(addr, "localhost", alpn);
-        // } catch(const std::exception& ex) {
-        //     continue;
-        // } 
-        std::cout << std::chrono::system_clock::now() << " before connect\n";
-        try {
-            co_await conn.async_connect(addr, boost::asio::use_awaitable);
-        }catch(std::exception& ex) {
-            std::cout << "exception1: " << ex.what() << "\n";
-        }
-        std::cout << std::chrono::system_clock::now() << " after connect\n";
-        break;
-    }
+    auto es = quic::resolve("localhost", "8443");
+    co_await quic::async_connect(conn, es, boost::asio::use_awaitable);
     
     std::cout << "------------------- connection ------------------------\n";
     ERR_print_errors_fp(stderr);
@@ -72,7 +60,13 @@ DONE:
 int main(int argc, char* argv[]) {
     boost::asio::io_context io;
 
-    boost::asio::co_spawn(io, run(io), [](std::exception_ptr e){ if (e) std::rethrow_exception(e); });
+    boost::asio::co_spawn(io, run(io), [](std::exception_ptr e){
+        try {
+            if (e) std::rethrow_exception(e);
+        } catch(const std::exception& ex) {
+            std::cout << "exception: " << ex.what() << "\n";
+        }
+    });
     io.run();
     std::cout << "done.\n";
 
