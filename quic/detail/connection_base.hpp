@@ -9,6 +9,7 @@
 
 #include <boost/asio/any_completion_handler.hpp>
 #include <chrono>
+#include <list>
 
 namespace quic {
 namespace detail {
@@ -28,7 +29,7 @@ public:
 
 
 private:
-    std::vector<boost::asio::any_completion_handler<void (boost::system::error_code)>> waitable_;
+    std::list<boost::asio::any_completion_handler<void (boost::system::error_code)>> waitable_;
     application_protocol_list alpn_;
     std::string               host_;
 
@@ -47,7 +48,7 @@ protected:
     , socket_(ex.get_executor())
     , timer_(strand_) 
     , ssl_(conn) {
-        waitable_.reserve(8);
+        // waitable_.reserve(8);
         alpn_ = application_protocol_list{"default/1"};
         host_ = "localhost";
     }
@@ -87,46 +88,49 @@ protected:
             timer_.expires_after(us);
             timer_.async_wait(boost::asio::bind_executor(strand_, [this] (boost::system::error_code error) {
                 if (error) return;
-                this->socket_.cancel();
+                // this->socket_.cancel();
+                while (!waitable_.empty()) {
+                    waitable_.back()(error);
+                    waitable_.pop_back();
+                }
             }));
         });
     }
 
     void on_waitable(boost::asio::any_completion_handler<void (boost::system::error_code)> op) {
-        boost::asio::post(strand_, [this, op = std::move(op)] () mutable {
-            int w = SSL_net_write_desired(ssl_),
-                r = SSL_net_read_desired(ssl_);
+        int w = SSL_net_write_desired(ssl_),
+            r = SSL_net_read_desired(ssl_);
 
-            if (r || w) {
-                waitable_.push_back(std::move(op));
-                
-                if (waitable_.size() == 1 && w)
-                    this->socket_.async_wait(boost::asio::socket_base::wait_write, boost::asio::bind_executor(strand_, 
-                        [this] (boost::system::error_code error) {
-                            if (ssl_ == nullptr) return;
-                            if (error == boost::asio::error::operation_aborted) {
-                                error = {};
-                            }
-                            for (auto& op : waitable_) {
-                                op(error);
-                            }
-                            waitable_.clear();
-                        }));
-                
-                else if (waitable_.size() == 1 && r)
-                    this->socket_.async_wait(boost::asio::socket_base::wait_read, boost::asio::bind_executor(strand_, 
-                        [this] (boost::system::error_code error) {
-                            if (ssl_ == nullptr) return;
-                            if (error == boost::asio::error::operation_aborted) {
-                                error = {};
-                            }
-                            while (!waitable_.empty()) {
-                                waitable_.back()(error);
-                                waitable_.pop_back();
-                            }
-                        }));
-            }
-        });
+        if (r || w) {
+            waitable_.push_back(std::move(op));
+            
+            return;
+            if (waitable_.size() == 1 && w)
+                this->socket_.async_wait(boost::asio::socket_base::wait_write, boost::asio::bind_executor(strand_, 
+                    [this] (boost::system::error_code error) {
+                        if (ssl_ == nullptr) return;
+                        if (error == boost::asio::error::operation_aborted) {
+                            error = {};
+                        }
+                        for (auto& op : waitable_) {
+                            op(error);
+                        }
+                        waitable_.clear();
+                    }));
+            
+            else if (waitable_.size() == 1 && r)
+                this->socket_.async_wait(boost::asio::socket_base::wait_read, boost::asio::bind_executor(strand_, 
+                    [this] (boost::system::error_code error) {
+                        if (ssl_ == nullptr) return;
+                        if (error == boost::asio::error::operation_aborted) {
+                            error = {};
+                        }
+                        while (!waitable_.empty()) {
+                            // waitable_.back()(error);
+                            waitable_.pop_back();
+                        }
+                    }));
+        }
     }
 
 
@@ -149,15 +153,21 @@ protected:
         case SSL_ERROR_WANT_READ:
             [[fallthrough]];
         case SSL_ERROR_WANT_WRITE:
-            if (auto us = get_timeout(); us > std::chrono::microseconds(0))
-                on_timeout(us);
+            // if (auto us = get_timeout(); us > std::chrono::microseconds(0))
+            //     on_timeout(us);
+            // on_waitable(std::move(h));
+
+            waitable_.push_back(std::move(h));
+            timer_.expires_after(std::chrono::milliseconds(2));
+            timer_.async_wait([this] (boost::system::error_code error) mutable {
+                while (!waitable_.empty()) {
+                    waitable_.back()(error);
+                    waitable_.pop_back();
+                }
+            });
+
             
-            on_waitable(std::move(h));
-            // on_waitable(detail::operation_wrapper{
-            //     // 注意将 std::move 后置
-            //     // 似乎其存在某种奇怪的副作用，目前没搞懂；
-            //     detail::operation<Handler, std::allocator<std::byte>>::create(std::move(h))
-            // });
+            
             return {};
         default:
             return {err, boost::asio::error::get_ssl_category()};
