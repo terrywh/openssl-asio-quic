@@ -16,8 +16,9 @@ boost::asio::awaitable<void> run(boost::asio::io_context& io) {
     ctx.set_verify_mode(boost::asio::ssl::context_base::verify_none);
     ctx.set_default_verify_paths();
 
-    quic::application_protocol_list alpn {"http/1.0"};
     quic::connection conn {ctx, io};
+    conn.set_alpn(quic::application_protocol_list {"http/1.0"});
+    conn.set_host("localhost");
 
     for (quic::endpoint addr : quic::resolve("localhost", "8443")) {
         std::cout << addr.to_string() << '\n';
@@ -29,7 +30,7 @@ boost::asio::awaitable<void> run(boost::asio::io_context& io) {
         // } 
         std::cout << std::chrono::system_clock::now() << " before connect\n";
         try {
-            co_await conn.async_connect("localhost", addr, alpn, boost::asio::use_awaitable);
+            co_await conn.async_connect(addr, boost::asio::use_awaitable);
         }catch(std::exception& ex) {
             std::cout << "exception1: " << ex.what() << "\n";
         }

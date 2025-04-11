@@ -34,9 +34,9 @@ public:
     basic_connection(boost::asio::ssl::context& ctx, ExecutorContext& ex)
     : detail::connection_base<Protocol, Executor>(ctx, ex, static_cast<SSL*>(nullptr)) { }
 
-    void connect(const endpoint_type& addr, const std::string& host, application_protocol_list& alpn) {
+    void connect(const endpoint_type& addr) {
         this->socket_.connect(addr);
-        this->create_ssl(addr, host, alpn, false);
+        this->create_ssl(addr, false);
         // TLS 协议握手
         if (int r = SSL_connect(this->ssl_); r <= 0) {
             throw boost::system::system_error(SSL_get_error(this->ssl_, r), boost::asio::error::get_ssl_category());
@@ -44,13 +44,12 @@ public:
     }
 
     template <class CompletionToken>
-    auto async_connect(const std::string& host, const endpoint_type& addr, application_protocol_list& alpn,
-        CompletionToken&& token) {
+    auto async_connect(const endpoint_type& addr, CompletionToken&& token) {
 
         return boost::asio::async_initiate<CompletionToken, void (boost::system::error_code)>(
-            [] (auto&& handler, detail::connection_base<Protocol, Executor>& conn, const endpoint_type& addr, const std::string& host, application_protocol_list& alpn) {
-                detail::do_connect<Protocol, Executor, decltype(handler)>{std::move(handler), conn, addr, host, alpn}({});
-            }, std::move(token), std::ref(*this), std::ref(addr), std::ref(host), std::ref(alpn));
+            [] (auto&& handler, detail::connection_base<Protocol, Executor>& conn, const endpoint_type& addr) {
+                detail::do_connect{std::move(handler), conn, addr}({});
+            }, std::move(token), std::ref(*this), std::ref(addr));
     }
 
     stream_type accept_stream() {

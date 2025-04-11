@@ -27,6 +27,8 @@ public:
 
 private:
     std::vector<detail::operation_wrapper> waitable_;
+    application_protocol_list alpn_;
+    std::string               host_;
 
 
 protected:
@@ -44,10 +46,11 @@ protected:
     , socket_(strand_)
     , ssl_(conn) {
         waitable_.reserve(8);
+        alpn_ = application_protocol_list{"default/1"};
+        host_ = "localhost";
     }
 
-    void create_ssl(const endpoint_type& addr,
-        const std::string& host, const application_protocol_list& alpn, bool nonblocking) {
+    void create_ssl(const endpoint_type& addr, bool nonblocking) {
         BOOST_ASSERT(socket_.is_open());
 
         if (nonblocking)
@@ -63,9 +66,9 @@ protected:
         BIO_set_fd(bio, socket_.native_handle(), BIO_NOCLOSE);
         SSL_set_bio(ssl_, bio, bio);
 
-        SSL_set_tlsext_host_name(ssl_, host.c_str());
-        SSL_set1_host(ssl_, host.c_str());
-        SSL_set_alpn_protos(ssl_, alpn, alpn.size());
+        SSL_set_tlsext_host_name(ssl_, host_.c_str());
+        SSL_set1_host(ssl_, host_.c_str());
+        SSL_set_alpn_protos(ssl_, alpn_, alpn_.size());
         SSL_set1_initial_peer_addr(ssl_, addr);
 
         if (nonblocking)
@@ -128,7 +131,6 @@ protected:
     template <class Handler>
     void handle_error(int r, Handler&& h) {
         int err = SSL_get_error(this->ssl_, r);
-        std::cout << std::chrono::system_clock::now() << " handle (result = " << r << " error = " << err << ")\n";
         detail::operation_wrapper op { detail::operation<Handler, std::allocator<std::byte>>::create(std::move(h)) };
 
         switch (err) {
@@ -149,6 +151,13 @@ protected:
     }
 
 public:
+    void set_alpn(const application_protocol_list& alpn) {
+        alpn_ = alpn;
+    }
+
+    void set_host(const std::string& host) {
+        host_ = host;
+    }
 
     executor_type get_executor() {
         return this->strand_;

@@ -30,6 +30,11 @@ public:
         }
     };
 
+    constexpr explicit application_protocol_list()
+    : size_(0) {
+
+    }
+
     constexpr explicit application_protocol_list(std::initializer_list<std::string> protos)
     : size_(protos.size()) {
         for (auto& proto : protos) {
@@ -37,6 +42,10 @@ public:
             list_.insert(list_.end(), proto.begin(), proto.end());
         }
     }
+
+    application_protocol_list(const application_protocol_list& alpn) = default;
+
+    application_protocol_list& operator =(const application_protocol_list& alpn) = default;
 
     constexpr operator const unsigned char*() const {
         return list_.data();

@@ -16,17 +16,12 @@ struct do_connect {
     handler_type handler_;
     connection_base<Protocol, Executor>& conn_;
     const endpoint_type& addr_;
-    const std::string& host_;
-    application_protocol_list& alpn_;
     enum {starting, connecting, creating, handshaking, done} state_;
     
-    do_connect(handler_type&& handler, connection_base<Protocol, Executor>& conn,
-        const endpoint_type& addr, const std::string& host, application_protocol_list& alpn)
+    do_connect(Handler&& handler, connection_base<Protocol, Executor>& conn, const endpoint_type& addr)
     : handler_(std::move(handler))
     , conn_(conn)
     , addr_(addr)
-    , host_(host)
-    , alpn_(alpn)
     , state_(starting) {
 
     }
@@ -34,9 +29,7 @@ struct do_connect {
     do_connect(const do_connect& impl) = delete;
     do_connect(do_connect&& impl) noexcept = default;
 
-
-    void operator ()(boost::system::error_code error) {
-                    
+    void operator ()(boost::system::error_code error) {         
     CONTINUE:
         switch(state_) {
         case starting:
@@ -54,7 +47,7 @@ struct do_connect {
                 });
                 return;
             }
-            conn_.create_ssl(addr_, host_, alpn_, true);
+            conn_.create_ssl(addr_, true);
             state_ = handshaking;
             goto CONTINUE;
             // break;

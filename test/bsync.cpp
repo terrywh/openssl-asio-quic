@@ -10,14 +10,15 @@ void run(boost::asio::io_context& io) {
     ctx.set_verify_mode(boost::asio::ssl::context_base::verify_none);
     ctx.set_default_verify_paths();
 
-    quic::application_protocol_list alpn {"http/1.0"};
     quic::connection conn {ctx, io};
+    conn.set_alpn(quic::application_protocol_list {"http/1.0"});
+    conn.set_host("localhost");
 
     for (quic::endpoint addr : quic::resolve("localhost", "8443")) {
         std::cout << addr.to_string() << '\n';
 
         try {
-            conn.connect(addr, "localhost", alpn);
+            conn.connect(addr);
         } catch(const std::exception& ex) {
             continue;
         } 
