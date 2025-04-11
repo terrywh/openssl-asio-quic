@@ -6,8 +6,8 @@
 #include "../alpn.hpp"
 #include "../basic_endpoint.hpp"
 #include "../proto.hpp"
-#include "operation.hpp"
 
+#include <boost/asio/any_completion_handler.hpp>
 #include <chrono>
 
 namespace quic {
@@ -28,7 +28,7 @@ public:
 
 
 private:
-    std::vector<detail::operation_wrapper> waitable_;
+    std::vector<boost::asio::any_completion_handler<void (boost::system::error_code)>> waitable_;
     application_protocol_list alpn_;
     std::string               host_;
 
@@ -50,6 +50,13 @@ protected:
         waitable_.reserve(8);
         alpn_ = application_protocol_list{"default/1"};
         host_ = "localhost";
+    }
+
+    ~connection_base() {
+        if (ssl_) {
+            SSL_free(ssl_);
+            ssl_ = nullptr;
+        }
     }
 
     void create_ssl(const endpoint_type& addr, bool nonblocking) {
@@ -85,7 +92,7 @@ protected:
         });
     }
 
-    void on_waitable(detail::operation_wrapper&& op) {
+    void on_waitable(boost::asio::any_completion_handler<void (boost::system::error_code)> op) {
         boost::asio::post(strand_, [this, op = std::move(op)] () mutable {
             int w = SSL_net_write_desired(ssl_),
                 r = SSL_net_read_desired(ssl_);
@@ -96,21 +103,27 @@ protected:
                 if (waitable_.size() == 1 && w)
                     this->socket_.async_wait(boost::asio::socket_base::wait_write, boost::asio::bind_executor(strand_, 
                         [this] (boost::system::error_code error) {
-                            if (error == boost::asio::error::operation_aborted) error = {};
+                            if (ssl_ == nullptr) return;
+                            if (error == boost::asio::error::operation_aborted) {
+                                error = {};
+                            }
                             for (auto& op : waitable_) {
-                                std::move(op)(error);
+                                op(error);
                             }
                             waitable_.clear();
                         }));
                 
-                if (waitable_.size() == 1 && r)
+                else if (waitable_.size() == 1 && r)
                     this->socket_.async_wait(boost::asio::socket_base::wait_read, boost::asio::bind_executor(strand_, 
                         [this] (boost::system::error_code error) {
-                            if (error == boost::asio::error::operation_aborted) error = {};
-                            for (auto& op: waitable_) {
-                                std::move(op)(error);
+                            if (ssl_ == nullptr) return;
+                            if (error == boost::asio::error::operation_aborted) {
+                                error = {};
                             }
-                            waitable_.clear();
+                            while (!waitable_.empty()) {
+                                waitable_.back()(error);
+                                waitable_.pop_back();
+                            }
                         }));
             }
         });
@@ -131,15 +144,20 @@ protected:
     template <class Handler>
     boost::system::error_code handle_error(int r, Handler&& h) {
         int err = SSL_get_error(this->ssl_, r);
-        // detail::operation_wrapper op { detail::operation<Handler, std::allocator<std::byte>>::create(std::move(h)) };
 
         switch (err) {
         case SSL_ERROR_WANT_READ:
             [[fallthrough]];
         case SSL_ERROR_WANT_WRITE:
-            // on_waitable(std::move(op));
-            // if (auto us = get_timeout(); us > std::chrono::microseconds(0))
-                on_timeout(std::chrono::milliseconds(1));
+            if (auto us = get_timeout(); us > std::chrono::microseconds(0))
+                on_timeout(us);
+            
+            on_waitable(std::move(h));
+            // on_waitable(detail::operation_wrapper{
+            //     // 注意将 std::move 后置
+            //     // 似乎其存在某种奇怪的副作用，目前没搞懂；
+            //     detail::operation<Handler, std::allocator<std::byte>>::create(std::move(h))
+            // });
             return {};
         default:
             return {err, boost::asio::error::get_ssl_category()};
