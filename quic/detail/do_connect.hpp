@@ -33,17 +33,20 @@ struct do_async_connect {
     template <class Self>
     void operator ()(Self& self, boost::system::error_code error = {}) const {         
         switch (state_) {
-        case connecting:
-            if (conn_.ssl_) {
-                SSL_free(conn_.ssl_);
-                conn_.ssl_ = nullptr;
+        case connecting: {
+                if (conn_.ssl_) {
+                    SSL_free(conn_.ssl_);
+                    conn_.ssl_ = nullptr;
+                }
+                state_ = creating;
+                conn_.socket_.async_connect(addr_, std::move(self));
             }
-            state_ = creating;
-            conn_.socket_.async_connect(addr_, std::move(self));
             break;
         case creating:
             if (error) {
-                self.complete(error);
+                boost::asio::post(conn_.strand_, [self = std::move(self), error] () mutable {
+                    self.complete(error);
+                });
                 return;
             }
             BOOST_ASSERT(conn_.socket_.is_open());
@@ -51,16 +54,20 @@ struct do_async_connect {
             conn_.create_ssl(addr_, true);
             [[fallthrough]];
         case handshaking:
-            if (int r = SSL_connect(conn_.ssl_); r != 1) {
-                error = conn_.handle_error(r, std::move(self));
-            } else {
-                state_ = done;
-                self.complete({});
-                return;
-            }
             if (error) { // 链接失败，清理 SSL 上下文（作为标记）
                 state_ = fail;
-                self.complete(error);
+                boost::asio::post(conn_.strand_, [self = std::move(self), error] () mutable {
+                    self.complete(error);
+                });
+                return;
+            }
+            if (int r = SSL_connect(conn_.ssl_); r != 1) {
+                conn_.async_handle_error(r, std::move(self));
+            } else {
+                state_ = done;
+                boost::asio::post(conn_.strand_, [self = std::move(self)] () mutable {
+                    self.complete(boost::system::error_code{});
+                });
             }
         }
     }
@@ -87,7 +94,9 @@ struct do_async_connect_seq {
     template <class Self>
     void operator()(Self& self, boost::system::error_code error = {}) const {
         if (conn_.ssl_ != nullptr) {
-            self.complete(error);
+            boost::asio::post(conn_.strand_, [self = std::move(self), error] () mutable {
+                self.complete(error);
+            });
             return;
         }
 
@@ -95,8 +104,10 @@ struct do_async_connect_seq {
         std::advance(i, start_++);
 
         if (i == eps_.end()) {
-            self.complete(boost::system::error_code{
-                boost::asio::error::host_unreachable, boost::asio::error::get_netdb_category()});
+            boost::asio::post(conn_.strand_, [self = std::move(self)] () mutable {
+                self.complete(boost::system::error_code{
+                    boost::asio::error::host_unreachable, boost::asio::error::get_netdb_category()});
+            });
             return;
         }
 
