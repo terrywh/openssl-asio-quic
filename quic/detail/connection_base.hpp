@@ -99,19 +99,6 @@ protected:
     }
 
     void on_waitable(boost::asio::any_completion_handler<void (boost::system::error_code)> handler) {
-        waitable_.emplace_back(std::move(handler));
-        this->timer_.expires_after(std::chrono::milliseconds(2));
-        this->timer_.async_wait([this] (boost::system::error_code error) mutable {
-            if (error) return;
-            while (!waitable_.empty()) {
-                auto handler = std::move(waitable_.back());
-                waitable_.pop_back();
-                (handler)(error);
-            }
-        });
-        return;
-
-        /*
         int w = SSL_net_write_desired(ssl_),
             r = SSL_net_read_desired(ssl_);
 
@@ -125,8 +112,9 @@ protected:
                             error = {};
                         }
                         while (!waitable_.empty()) {
-                            waitable_.back()(error);
+                            auto handler = std::move(waitable_.back());
                             waitable_.pop_back();
+                            handler(error);
                         }
                     }));
             
@@ -137,16 +125,13 @@ protected:
                             error = {};
                         }
                         while (!waitable_.empty()) {
-                            std::cout << "before call\n";
-                            waitable_.back()(error);
+                            auto handler = std::move(waitable_.back());
                             waitable_.pop_back();
-                            std::cout << "after call\n";
+                            handler(error); // 调用时存在 std::move 逻辑，避免直接在 waitable_ 内调用
+                            //（否则可能导致某种内存问题，如 bad_function_call 等问题；
                         }
                     }));
-        } else {
-            std::cout << "nothing\n";
         }
-            */
     }
 
 
@@ -166,8 +151,8 @@ protected:
         int err = SSL_get_error(this->ssl_, r);
 
         if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-            // if (auto us = get_timeout(); us > std::chrono::microseconds(0))
-            //     on_timeout(us);
+            if (auto us = get_timeout(); us > std::chrono::microseconds(0))
+                on_timeout(us);
             on_waitable(std::move(handler));
         } else {
             boost::asio::post(strand_, [handler = std::move(handler), err] () mutable {
