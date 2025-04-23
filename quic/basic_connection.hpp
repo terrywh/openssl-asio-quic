@@ -5,6 +5,7 @@
 #include "detail/ssl.hpp"
 #include "detail/connection_base.hpp"
 #include "detail/do_connect.hpp"
+#include "detail/do_create_stream.hpp"
 #include "alpn.hpp"
 #include "basic_endpoint.hpp"
 #include "basic_stream.hpp"
@@ -15,82 +16,80 @@
 namespace quic {
 
 template <class Protocol, class Executor = boost::asio::any_io_executor>
-class basic_connection : public detail::connection_base<Protocol, Executor> {
+class basic_connection {
+    template <class Protocol1, class Executor1, class CompletionToken>
+    friend auto async_connect(basic_connection<Protocol1, Executor1>& conn,
+        const basic_endpoints<Protocol1>& addr, CompletionToken&& token);
+
+    template <class Protocol1, class Executor1>
+    friend auto connect(basic_connection<Protocol1, Executor1>& conn,
+        const basic_endpoints<Protocol1>& addr);
 
     using executor_type = typename detail::connection_base<Protocol,Executor>::executor_type;
     using endpoint_type = typename detail::connection_base<Protocol,Executor>::endpoint_type;
     using stream_type = basic_stream<Protocol, Executor>;
 
 private:
+    detail::connection_base<Protocol, Executor>* base_;
+
     template <class ExecutorContext>
-    basic_connection(boost::asio::ssl::context& ctx, ExecutorContext& ex, SSL* conn)
-    : detail::connection_base<Protocol, Executor>(ctx, ex, conn) { }
+    basic_connection(ExecutorContext& ex, boost::asio::ssl::context& ctx, SSL* ssl)
+    : base_(new detail::connection_base<Protocol, Executor>(ex, ctx, ssl)) {
+        
+    }
 
 public:
     basic_connection(basic_connection&& conn) = delete;
     basic_connection(const basic_connection& conn) = delete;
 
     template <class ExecutorContext>
-    basic_connection(boost::asio::ssl::context& ctx, ExecutorContext& ex)
-    : detail::connection_base<Protocol, Executor>(ctx, ex, static_cast<SSL*>(nullptr)) { }
+    basic_connection(ExecutorContext& ex, boost::asio::ssl::context& ctx)
+    : base_(new detail::connection_base<Protocol, Executor>(ex, ctx)) { }
+
+    SSL* native_handle() const {
+        return base_->ssl_;
+    }
 
     ~basic_connection() {
-        std::cout << "~basic_connection\n";
+        base_->del_ref();
+    }
+
+    void set_alpn(const application_protocol_list& alpn) {
+        base_->set_alpn(alpn);
+    }
+    void set_host(const std::string& host) {
+        base_->set_host(host);
     }
 
     void connect(const endpoint_type& addr) {
-        this->socket_.connect(addr);
-        this->create_ssl(addr, false);
-        // TLS 协议握手
-        if (int r = SSL_connect(this->ssl_); r <= 0) {
-            SSL_free(this->ssl_);
-            this->ssl_ = nullptr;
-            throw boost::system::system_error(SSL_get_error(this->ssl_, r), boost::asio::error::get_ssl_category());
-        }
+        detail::do_connect{base_, addr}();
     }
 
     template <class CompletionToken>
     auto async_connect(const endpoint_type& addr, CompletionToken&& token) {
         return boost::asio::async_compose<CompletionToken, void (boost::system::error_code)>(
-            detail::do_async_connect{*this, addr}, token);
+            detail::do_async_connect{base_, addr}, token);
     }
 
-    stream_type accept_stream() {
-        if (SSL* stream = SSL_accept_stream(this->ssl_, 0); stream == nullptr) {
-            throw boost::system::system_error(SSL_get_error(this->ssl_, 0), boost::asio::error::get_ssl_category());
-        } else {
-            return {*this, stream};
-        }
-    }
-
-    // using do_accept_stream = detail::accept_stream_impl<protocol_type, executor_type>;
-    // template <class CompletionToken>
-    // auto async_accept_stream(basic_stream<Protocol, Executor>& stream, CompletionToken&& token) -> decltype(
-    //     boost::asio::async_compose<CompletionToken, void(boost::system::error_code, stream_type)>(
-    //         std::declval<do_accept_stream>(), token, this->socket_)) {
-        
-    //     return boost::asio::async_compose<CompletionToken, void(boost::system::error_code, stream_type)>(
-    //         do_accept_stream{*this->conn_, stream}, token, this->socket_);
+    // accept_stream(stream_type& stream) {
+    //     stream.base_ = new detail::stream_base<Protocol, Executor>(base_);
+    //     if (stream.base_->handle_ = SSL_accept_stream(base_->ssl_, 0); stream.base_->handle_ == nullptr) {
+    //         throw boost::system::system_error(SSL_get_error(base_->ssl_, 0), boost::asio::error::get_ssl_category());
+    //     }
     // }
 
-    stream_type create_stream() {
-        if (SSL* ssl = SSL_new_stream(this->ssl_, 0); ssl == nullptr) {
-            throw boost::system::system_error(SSL_get_error(this->ssl_, 0), boost::asio::error::get_ssl_category());
-        } else {
-            return {*this, ssl};
-        }
+    void create_stream(stream_type& stream) {
+        stream.base_ = new detail::stream_base<Protocol, Executor>(base_);
+        detail::do_create_stream{base_, stream.base_}();
     }
 
-    // using do_create_stream = detail::create_stream_impl<protocol_type, executor_type>;
-
-    // template <class Executor1, class CompletionToken>
-    // auto async_create_stream(basic_stream<Protocol, Executor1>& stream, CompletionToken&& token) ->
-    //     decltype(boost::asio::async_compose<CompletionToken, void(boost::system::error_code)>(
-    //         std::declval<do_create_stream>(), this->socket_
-    //     )) {
-    //     return boost::asio::async_compose<CompletionToken, void(boost::system::error_code)>(
-    //         do_create_stream{*this, stream}, this->socket_);
-    // }
+    // 参考 async_connect 实现 async_create_stream
+    template <class CompletionToken>
+    auto async_create_stream(stream_type& stream, CompletionToken&& token) {
+        stream.base_ = new detail::stream_base<Protocol, Executor>();
+        return boost::asio::async_compose<CompletionToken, void(boost::system::error_code, stream_type)>(
+            detail::do_async_create_stream{base_, stream.base_}, token);
+    }
 
     template <class Protocol1, class Executor1>
     friend class basic_server;

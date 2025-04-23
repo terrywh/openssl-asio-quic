@@ -13,14 +13,38 @@ class basic_connection;
 namespace detail {
 
 template <class Protocol, class Executor>
+struct do_connect {
+    connection_base<Protocol, Executor>* conn_;
+    using endpoint_type = typename connection_base<Protocol, Executor>::endpoint_type;
+    endpoint_type addr_;
+
+    do_connect(connection_base<Protocol, Executor>* conn, const endpoint_type& addr)
+    : conn_(conn)
+    , addr_(addr) {}
+
+    void operator()() const {
+        conn_->socket_.connect(addr_);
+
+        BIO* bio = BIO_new(BIO_s_datagram());
+        BIO_set_fd(bio, conn_->socket_.native_handle(), BIO_NOCLOSE);
+        SSL_set_bio(conn_->handle_, bio, bio);
+
+        if (int r = SSL_connect(conn_->handle_); r <= 0) {
+            throw boost::system::system_error(SSL_get_error(conn_->handle_, r), boost::asio::error::get_ssl_category());
+        }
+    }
+};
+
+template <class Protocol, class Executor>
 struct do_async_connect {
     using endpoint_type = typename connection_base<Protocol, Executor>::endpoint_type;
 
-    connection_base<Protocol, Executor>& conn_;
-    endpoint_type addr_;
-    mutable enum {connecting, creating, handshaking, fail, done} state_;
+    connection_base<Protocol, Executor>* conn_;
     
-    do_async_connect(connection_base<Protocol, Executor>& conn, const endpoint_type& addr)
+    endpoint_type addr_;
+    mutable enum {connecting, binding, handshaking} state_;
+    
+    do_async_connect(connection_base<Protocol, Executor>* conn, const endpoint_type& addr)
     : conn_(conn)
     , addr_(addr) 
     , state_(connecting) {
@@ -30,42 +54,40 @@ struct do_async_connect {
     do_async_connect(const do_async_connect& impl) = delete;
     do_async_connect(do_async_connect&& impl) = default;
 
+    void bind() const {
+        BIO* bio = BIO_new(BIO_s_datagram());
+        BIO_set_fd(bio, conn_->socket_.native_handle(), BIO_NOCLOSE);
+        SSL_set_bio(conn_->handle_, bio, bio);
+    }
+
     template <class Self>
-    void operator ()(Self& self, boost::system::error_code error = {}) const {         
+    void operator ()(Self& self, boost::system::error_code error = {}) const {
+        if (error) {
+            boost::asio::post(conn_->strand_, [self = std::move(self), error] () mutable {
+                self.complete(error);
+            });
+            return;
+        }
+
         switch (state_) {
-        case connecting: {
-                if (conn_.ssl_) {
-                    SSL_free(conn_.ssl_);
-                    conn_.ssl_ = nullptr;
-                }
-                state_ = creating;
-                conn_.socket_.async_connect(addr_, std::move(self));
-            }
+        case connecting: 
+            state_ = binding;
+            SSL_set1_initial_peer_addr(conn_->handle_, addr_);
+            conn_->socket_.async_connect(addr_, std::move(self));
             break;
-        case creating:
-            if (error) {
-                boost::asio::post(conn_.strand_, [self = std::move(self), error] () mutable {
-                    self.complete(error);
-                });
-                return;
-            }
-            BOOST_ASSERT(conn_.socket_.is_open());
+        case binding:
             state_ = handshaking;
-            conn_.create_ssl(addr_, true);
+
+            BOOST_ASSERT(conn_->socket_.is_open());
+            conn_->socket_.native_non_blocking(true);
+            bind();
+
             [[fallthrough]];
         case handshaking:
-            if (error) { // 链接失败，清理 SSL 上下文（作为标记）
-                state_ = fail;
-                boost::asio::post(conn_.strand_, [self = std::move(self), error] () mutable {
-                    self.complete(error);
-                });
-                return;
-            }
-            if (int r = SSL_connect(conn_.ssl_); r != 1) {
-                conn_.async_handle_error(r, std::move(self));
+            if (int r = SSL_connect(conn_->handle_); r != 1) {
+                conn_->async_handle_error(r, std::move(self));
             } else {
-                state_ = done;
-                boost::asio::post(conn_.strand_, [self = std::move(self)] () mutable {
+                boost::asio::post(conn_->strand_, [self = std::move(self)] () mutable {
                     self.complete(boost::system::error_code{});
                 });
             }
@@ -79,13 +101,13 @@ struct do_async_connect_seq {
     using iterator_type = typename EndpointSequence::iterator;
     using difference_type = iterator_type::difference_type;
    
-    connection_base<Protocol, Executor>& conn_;
-    endpoint_seq eps_;
+    connection_base<Protocol, Executor>* conn_;
+    endpoint_seq addr_;
     mutable difference_type start_;
 
-    do_async_connect_seq(connection_base<Protocol, Executor>& conn, const EndpointSequence& eps)
+    do_async_connect_seq(connection_base<Protocol, Executor>* conn, const EndpointSequence& addr)
     : conn_(conn)
-    , eps_(eps)
+    , addr_(addr)
     , start_(0) {}
 
     do_async_connect_seq(const do_async_connect_seq& seq) = delete;
@@ -93,25 +115,27 @@ struct do_async_connect_seq {
 
     template <class Self>
     void operator()(Self& self, boost::system::error_code error = {}) const {
-        if (conn_.ssl_ != nullptr) {
-            boost::asio::post(conn_.strand_, [self = std::move(self), error] () mutable {
+        if (!error && start_ > 0) {
+            boost::asio::post(conn_->strand_, [self = std::move(self), error] () mutable {
                 self.complete(error);
             });
             return;
         }
 
-        iterator_type i = eps_.begin();
+        iterator_type i = addr_.begin();
         std::advance(i, start_++);
 
-        if (i == eps_.end()) {
-            boost::asio::post(conn_.strand_, [self = std::move(self)] () mutable {
+        if (i == addr_.end()) {
+            boost::asio::post(conn_->strand_, [self = std::move(self)] () mutable {
                 self.complete(boost::system::error_code{
                     boost::asio::error::host_unreachable, boost::asio::error::get_netdb_category()});
             });
             return;
         }
 
-        static_cast<basic_connection<Protocol, Executor>&>(conn_).async_connect(*i, std::move(self));
+
+        boost::asio::async_compose<Self, void (boost::system::error_code)>(
+            detail::do_async_connect{conn_, *i}, self);
     }
 };
 
@@ -121,18 +145,21 @@ struct do_connect_seq {
     using endpoint_type = typename EndpointSequence::value_type;
 
 
-    connection_base<Protocol, Executor>& conn_;
-    EndpointSequence eps_;
+    connection_base<Protocol, Executor>* conn_;
+    EndpointSequence addr_;
 
-    do_connect_seq(connection_base<Protocol, Executor>& conn, const EndpointSequence& eps)
+    do_connect_seq(connection_base<Protocol, Executor>* conn, const EndpointSequence& eps)
     : conn_(conn)
-    , eps_(eps) {}
+    , addr_(eps) {}
 
     endpoint_type operator()() {
-        for (const auto& ep : eps_) {
-            static_cast<basic_connection<Protocol, Executor>&>(conn_).connect(ep);
-            if (conn_.ssl_ != nullptr)
-                return ep;
+        for (const auto& addr : addr_) {
+            try {
+                do_connect{conn_, addr}();
+            } catch(...) {
+                continue;
+            }
+            break;
         }
         throw boost::system::system_error(boost::asio::error::host_unreachable, boost::asio::error::get_netdb_category());
         // boost::system::error_code{

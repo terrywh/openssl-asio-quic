@@ -10,13 +10,14 @@ namespace quic {
 template <class Protocol, class Executor, class CompletionToken>
 auto async_connect(basic_connection<Protocol, Executor>& conn, const basic_endpoints<Protocol>& eps,
     CompletionToken&& token) {
+
     return boost::asio::async_compose<CompletionToken, void (boost::system::error_code)>(
-        detail::do_async_connect_seq{conn, eps}, token);
+        detail::do_async_connect_seq{conn.base_, eps}, token);
 }
 
 template <class Protocol, class Executor>
 auto connect(basic_connection<Protocol, Executor>& conn, const basic_endpoints<Protocol>& eps) {
-    return detail::do_connect_seq{conn, eps}();
+    return detail::do_connect_seq<Protocol, Executor, basic_endpoints<Protocol>>{conn.base_, eps}();
 }
 
 } // namespace quic

@@ -6,6 +6,7 @@
 #include "../alpn.hpp"
 #include "../basic_endpoint.hpp"
 #include "../proto.hpp"
+#include "extra_data.hpp"
 
 #include <boost/asio/any_completion_handler.hpp>
 #include <boost/asio/immediate.hpp>
@@ -18,74 +19,43 @@ namespace quic {
 namespace detail {
 
 template <class Protocol, class Executor>
-class connection_base {
-    template <class Protocol1, class Executor1>
-    friend class do_async_connect;
-    template <class Protocol1, class Executor1, class EndpointSequence>
-    friend class do_async_connect_seq;
+struct connection_base {
 
-    template <class Protocol1, class Executor1, class EndpointSequence>
-    friend class do_connect_seq;
-public:
     using executor_type = boost::asio::strand<Executor>;
     using endpoint_type = typename boost::asio::basic_socket<Protocol, Executor>::endpoint_type;
 
 
-private:
-    std::vector<
-            boost::asio::any_completion_handler<void (boost::system::error_code)>
-        > waitable_;
+    boost::asio::strand<Executor>                strand_;
+    boost::asio::ssl::context&                   sslctx_;
+
+    SSL*                                         handle_;
+    boost::asio::basic_datagram_socket<Protocol> socket_;
+    boost::asio::steady_timer                     timer_;
+    std::vector<boost::asio::any_completion_handler<void (boost::system::error_code)>> waitable_;
+
     application_protocol_list alpn_;
     std::string               host_;
 
-
-protected:
-    boost::asio::ssl::context& ctx_;
-    boost::asio::strand<Executor> strand_;
-    boost::asio::basic_datagram_socket<Protocol> socket_;
-    boost::asio::steady_timer timer_;
-    SSL* ssl_;
-
     template <class ExecutorContext>
-    connection_base(boost::asio::ssl::context& ctx, ExecutorContext& ex, SSL* conn)
-    : ctx_(ctx) 
-    , strand_(ex.get_executor()) 
+    connection_base(ExecutorContext& ex, boost::asio::ssl::context& ctx)
+    : strand_(ex.get_executor()) 
+    , sslctx_(ctx) 
+    , handle_(SSL_new(sslctx_.native_handle()))
     , socket_(strand_)
-    , timer_(strand_) 
-    , ssl_(conn) {
+    , timer_(strand_) {
         waitable_.reserve(8);
-        alpn_ = application_protocol_list{"default/1"};
-        host_ = "localhost";
+        SSL_set_default_stream_mode(handle_, SSL_DEFAULT_STREAM_MODE_NONE);
+        set_alpn(application_protocol_list{"default/1"});
+        set_host("localhost");
+        extra_data<connection_base>::attach(handle_, this);
     }
 
-    ~connection_base() {
-        if (ssl_) {
-            SSL_free(ssl_);
-            ssl_ = nullptr;
-        }
+    void add_ref() {
+        SSL_up_ref(handle_);
     }
-
-    void create_ssl(const endpoint_type& addr, bool nonblocking) {
-        BOOST_ASSERT(this->socket_.is_open());
-
-        if (nonblocking)
-            this->socket_.native_non_blocking(true);
-
-        ssl_ = SSL_new(ctx_.native_handle());
-        SSL_set_default_stream_mode(ssl_, SSL_DEFAULT_STREAM_MODE_NONE);
-
-
-        BIO* bio = BIO_new(BIO_s_datagram());
-        BIO_set_fd(bio, this->socket_.native_handle(), BIO_NOCLOSE);
-        SSL_set_bio(ssl_, bio, bio);
-
-        SSL_set_tlsext_host_name(ssl_, host_.c_str());
-        SSL_set1_host(ssl_, host_.c_str());
-        SSL_set_alpn_protos(ssl_, alpn_, alpn_.size());
-        SSL_set1_initial_peer_addr(ssl_, addr);
-
-        if (nonblocking)
-            SSL_set_blocking_mode(ssl_, 0);
+    // 引用数降为零时，将删除当前对象
+    void del_ref() {
+        SSL_free(handle_); 
     }
 
     void on_timeout(std::chrono::steady_clock::duration us) {
@@ -99,8 +69,8 @@ protected:
     }
 
     void on_waitable(boost::asio::any_completion_handler<void (boost::system::error_code)> handler) {
-        int w = SSL_net_write_desired(ssl_),
-            r = SSL_net_read_desired(ssl_);
+        int w = SSL_net_write_desired(handle_),
+            r = SSL_net_read_desired(handle_);
 
         if (r || w) {
             waitable_.push_back(std::move(handler));
@@ -139,7 +109,7 @@ protected:
         struct timeval tv;
         int isinfinite;
         std::chrono::microseconds us { 0 };
-        if (SSL_get_event_timeout(ssl_, &tv, &isinfinite) && !isinfinite) 
+        if (SSL_get_event_timeout(handle_, &tv, &isinfinite) && !isinfinite) 
             us = std::chrono::microseconds(tv.tv_usec + tv.tv_sec * 1000000);
         
         return us < std::chrono::milliseconds(8) ? us : std::chrono::microseconds(0);
@@ -148,7 +118,7 @@ protected:
 
     template <class Handler>
     void async_handle_error(int r, Handler&& handler) {
-        int err = SSL_get_error(this->ssl_, r);
+        int err = SSL_get_error(handle_, r);
 
         if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
             if (auto us = get_timeout(); us > std::chrono::microseconds(0))
@@ -161,19 +131,16 @@ protected:
         }
     }
 
-public:
     void set_alpn(const application_protocol_list& alpn) {
         alpn_ = alpn;
+        SSL_set_alpn_protos(handle_, alpn_, alpn_.size());
     }
 
     void set_host(const std::string& host) {
         host_ = host;
+        SSL_set_tlsext_host_name(handle_, host_.c_str());
+        SSL_set1_host(handle_, host_.c_str());
     }
-
-    executor_type get_executor() {
-        return this->strand_;
-    }
-
 };
 
 } // namespace detail

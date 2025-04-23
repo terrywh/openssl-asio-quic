@@ -7,11 +7,11 @@
 
 
 void run(boost::asio::io_context& io) {
-    boost::asio::ssl::context ctx {SSL_CTX_new(OSSL_QUIC_client_method())};
-    ctx.set_verify_mode(boost::asio::ssl::context_base::verify_none);
-    ctx.set_default_verify_paths();
+    boost::asio::ssl::context sslctx {SSL_CTX_new(OSSL_QUIC_client_method())};
+    sslctx.set_verify_mode(boost::asio::ssl::context_base::verify_none);
+    sslctx.set_default_verify_paths();
 
-    quic::connection conn {ctx, io};
+    quic::connection conn {io, sslctx};
     conn.set_alpn(quic::application_protocol_list {"http/1.0"});
     conn.set_host("localhost");
 
@@ -29,7 +29,8 @@ void run(boost::asio::io_context& io) {
     };
 
     try {
-        quic::stream stream = conn.create_stream();
+        quic::stream stream;
+        conn.create_stream(stream);
         std::cout << "stream: \n";
 
         std::size_t size = stream.write_some(boost::asio::buffer(payload));
@@ -54,10 +55,38 @@ DONE:
     std::cout << "done.\n";
 }
 
+struct Demo {};
+
+void CRYPTO_EX_free_cb (void *parent, void *ptr, CRYPTO_EX_DATA *ad,
+      int idx, long argl, void *argp) {
+    
+    if (!ptr) return;
+
+    std::cout << "free\n";
+    delete reinterpret_cast<Demo*>(ptr);
+}
+
+int CRYPTO_EX_dup_cb (CRYPTO_EX_DATA *to, const CRYPTO_EX_DATA *from,
+    void **from_d, int idx, long argl, void *argp) {
+        
+        std::cout << "dup\n";
+    return 1;
+}
+
+int CRYPTO_SSL_IDX;
 
 int main(int argc, char* argv[]) {
-    boost::asio::io_context io;
-    run(io);
-    io.run();
+    CRYPTO_SSL_IDX = SSL_get_ex_new_index(0, nullptr, nullptr, &CRYPTO_EX_dup_cb, &CRYPTO_EX_free_cb);
+
+    boost::asio::ssl::context ctx {SSL_CTX_new(OSSL_QUIC_client_method())};
+   
+    SSL* ssl = SSL_new(ctx.native_handle());
+    SSL_set_default_stream_mode(ssl, SSL_DEFAULT_STREAM_MODE_NONE);
+    SSL_set_ex_data(ssl, CRYPTO_SSL_IDX, new Demo());
+
+    SSL_free(ssl);
+    // boost::asio::io_context io;
+    // run(io);
+    // io.run();
     return 0;
 }
