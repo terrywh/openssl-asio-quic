@@ -10,9 +10,6 @@
 #include "basic_endpoint.hpp"
 #include "basic_stream.hpp"
 
-#include <boost/core/demangle.hpp>
-#include <iostream>
-
 namespace quic {
 
 template <class Protocol, class Executor = boost::asio::any_io_executor>

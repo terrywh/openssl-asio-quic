@@ -2,8 +2,8 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
-#include <boost/function.hpp>
 #include <iostream>
+#include <format>
 
 static std::string payload {
     "GET /hello HTTP/1.0\r\n"
@@ -17,37 +17,13 @@ boost::asio::awaitable<void> run(boost::asio::io_context& io) {
     sslctx.set_default_verify_paths();
 
     quic::connection conn {io, sslctx};
-    conn.set_alpn(quic::application_protocol_list {"http/1.0"});
     conn.set_host("localhost");
+    conn.set_alpn(quic::application_protocol_list {"http/1.0"});
 
-    auto es = quic::resolve("localhost", "8443");
-    co_await quic::async_connect(conn, es, boost::asio::use_awaitable);
+    co_await quic::async_connect(conn, quic::resolve("localhost", "8443"),
+        boost::asio::use_awaitable);
     
-    std::cout << "------------------- connection ------------------------\n";
-    ERR_print_errors_fp(stderr);
-    std::cout << "-------------------------------------------------------\n";
-
-    // try {
-    //     quic::stream stream = conn.create_stream();
-    //     std::cout << "stream: \n";
-
-    //     std::size_t size = stream.write_some(boost::asio::buffer(payload));
-    //     std::cout << "write: \n";
-    //     stream.shutdown(boost::asio::socket_base::shutdown_send);
-
-    //     payload.resize(1024);
-    //     size = stream.read_some(boost::asio::buffer(payload));
-    //     payload.resize(size);
-    //     std::cout << "read: (" << size << ")\n";
-
-    //     std::cout << payload << "\n";
-    // } catch(const std::runtime_error& ex) {
-    //     std::cout << "------------------- exception -------------------------\n";
-    //     std::cout << ex.what() << "\n";
-    //     ERR_print_errors_fp(stderr);
-    //     std::cout << "-------------------------------------------------------\n";
-    //     goto DONE;
-    // }
+    std::cout << std::format("{:-^64}\n", "connection established");
 
 DONE:
     co_return;
@@ -60,6 +36,8 @@ int main(int argc, char* argv[]) {
     boost::asio::co_spawn(io, run(io), [](std::exception_ptr e){
         try {
             if (e) std::rethrow_exception(e);
+        } catch(const boost::system::system_error& ex) {
+            std::cout << "system_error: (" << ex.what() << "\n";
         } catch(const std::exception& ex) {
             std::cout << "exception: " << ex.what() << "\n";
         }

@@ -1,8 +1,8 @@
 #ifndef ASIO_QUIC_DETAIL_ALPN_H
 #define ASIO_QUIC_DETAIL_ALPN_H
 
-#include <boost/assert.hpp>
 #include <initializer_list>
+#include <vector>
 
 namespace quic {
 

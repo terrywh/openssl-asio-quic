@@ -2,6 +2,7 @@
 #define QUIC_DETAIL_ASIO_H
 
 #include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/any_completion_handler.hpp>
 #include <boost/asio/basic_datagram_socket.hpp>
 #include <boost/asio/bind_executor.hpp>
 #include <boost/asio/compose.hpp>

@@ -24,6 +24,8 @@ struct do_connect_base {
     : conn_(conn)
     , addr_(addr) {}
 
+    do_connect_base(do_connect_base&& other) = default;
+
     void create(bool blocking) const {
         conn_->handle_ = SSL_new(conn_->sslctx_.native_handle());
         SSL_set_default_stream_mode(conn_->handle_, SSL_DEFAULT_STREAM_MODE_NONE);
@@ -32,13 +34,10 @@ struct do_connect_base {
         SSL_set_alpn_protos(conn_->handle_, conn_->alpn_, conn_->alpn_.size());
         SSL_set_tlsext_host_name(conn_->handle_, conn_->host_.c_str());
         SSL_set1_host(conn_->handle_, conn_->host_.c_str());
-        ERR_print_errors_fp(stderr);
 
         BIO* bio = BIO_new(BIO_s_datagram());
-        BOOST_ASSERT(conn_->socket_.is_open());
         BIO_set_fd(bio, conn_->socket_.native_handle(), BIO_NOCLOSE);
         SSL_set_bio(conn_->handle_, bio, bio);
-        ERR_print_errors_fp(stderr);
 
         SSL_set1_initial_peer_addr(conn_->handle_, addr_);
     }
@@ -53,15 +52,23 @@ struct do_connect: public do_connect_base<Protocol, Executor> {
     : do_connect_base<Protocol,Executor>(conn, addr) {}
 
     void operator()() const {
+        this->conn_->socket_.close();
+        this->conn_->socket_.connect(this->addr_);
+
         extra_data<connection_type>::detach(this->conn_->handle_);
         SSL_free(this->conn_->handle_);
-        this->conn_->socket_.connect(this->addr_);
         this->create(true);
 
         if (int r = SSL_connect(this->conn_->handle_); r <= 0) {
-            this->conn_->socket_.close();
-            ERR_print_errors_fp(stderr);
-            throw boost::system::system_error(SSL_get_error(this->conn_->handle_, r), boost::asio::error::get_ssl_category());
+            int err = SSL_get_error(this->conn_->handle_, r);
+            switch (err) {
+            case SSL_ERROR_SYSCALL:
+                throw boost::system::system_error{errno, boost::asio::error::get_system_category()};
+                break;
+            default:
+                throw boost::system::system_error{err, boost::asio::error::get_ssl_category()};
+            }
+            
         }
     }
 };
@@ -80,32 +87,42 @@ struct do_async_connect: public do_connect_base<Protocol, Executor> {
     template <class Self>
     void operator ()(Self& self, boost::system::error_code error = {}) const {
         if (error) {
-            boost::asio::post(this->conn_->strand_, [self = std::move(self), error] () mutable {
-                self.complete(error);
-            });
+            self.complete(error);
             return;
         }
 
         switch (state_) {
         case connecting: 
             state_ = binding;
-            this->conn_->socket_.native_non_blocking(true);
+            this->conn_->socket_.close();
             this->conn_->socket_.async_connect(this->addr_, std::move(self));
             break;
         case binding:
             state_ = handshaking;
-            BOOST_ASSERT(this->conn_->socket_.is_open());
+            this->conn_->socket_.native_non_blocking(true);
+
+            extra_data<connection_type>::detach(this->conn_->handle_);
+            SSL_free(this->conn_->handle_);
             this->create(false);
             SSL_set_blocking_mode(this->conn_->handle_, 0);
 
             [[fallthrough]];
         case handshaking:
             if (int r = SSL_connect(this->conn_->handle_); r != 1) {
-                this->conn_->async_handle_error(r, std::move(self));
+                int err = SSL_get_error(this->conn_->handle_, r);
+                switch (err) {
+                case SSL_ERROR_WANT_READ:
+                case SSL_ERROR_WANT_WRITE:
+                    this->conn_->async_wait(std::move(self));
+                    break;
+                case SSL_ERROR_SYSCALL:
+                    self.complete(boost::system::error_code{errno, boost::asio::error::get_system_category()});
+                    break;
+                default:
+                    self.complete(boost::system::error_code{err, boost::asio::error::get_ssl_category()});
+                }
             } else {
-                boost::asio::post(this->conn_->strand_, [self = std::move(self)] () mutable {
-                    self.complete(boost::system::error_code{});
-                });
+                self.complete(boost::system::error_code{});
             }
         }
     }
@@ -142,8 +159,9 @@ struct do_async_connect_seq {
         std::advance(i, start_++);
 
         if (i == addr_.end()) {
-            boost::asio::post(conn_->strand_, [self = std::move(self)] () mutable {
-                self.complete(boost::system::error_code{
+            boost::asio::post(conn_->strand_, [self = std::move(self), error] () mutable {
+                if (error) self.complete(error);
+                else self.complete(boost::system::error_code{
                     boost::asio::error::host_unreachable, boost::asio::error::get_system_category()});
             });
             return;
@@ -168,18 +186,18 @@ struct do_connect_seq {
     , addr_(eps) {}
 
     endpoint_type operator()() {
-        for (const auto& addr : addr_) {
+        auto i = addr_.begin();
+        for (;;) {
             try {
-                do_connect<Protocol, Executor>{conn_, addr}();
+                do_connect<Protocol, Executor>{conn_, *i}();
             } catch(const std::exception& ex) {
-                std::cerr << ex.what() << "\n";
+                if (++i == addr_.end()) throw;
                 continue;
             }
-            return addr;
+            return *i;
         }
-        throw boost::system::system_error(boost::asio::error::host_unreachable, boost::asio::error::get_system_category());
-        // boost::system::error_code{
-        //     boost::asio::error::host_unreachable, boost::asio::error::get_netdb_category()});
+        throw boost::system::system_error(boost::asio::error::host_unreachable,
+            boost::asio::error::get_system_category());
     }
 };
 
