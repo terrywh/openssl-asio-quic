@@ -40,14 +40,16 @@ struct connection_base {
     connection_base(ExecutorContext& ex, boost::asio::ssl::context& ctx)
     : strand_(ex.get_executor()) 
     , sslctx_(ctx) 
-    , handle_(SSL_new(sslctx_.native_handle()))
+    , handle_(nullptr)
     , socket_(strand_)
     , timer_(strand_) {
         waitable_.reserve(8);
-        SSL_set_default_stream_mode(handle_, SSL_DEFAULT_STREAM_MODE_NONE);
         set_alpn(application_protocol_list{"default/1"});
         set_host("localhost");
-        extra_data<connection_base>::attach(handle_, this);
+    }
+
+    ~connection_base() {
+        std::cout << "~connection_base\n";
     }
 
     void add_ref() {
@@ -133,13 +135,10 @@ struct connection_base {
 
     void set_alpn(const application_protocol_list& alpn) {
         alpn_ = alpn;
-        SSL_set_alpn_protos(handle_, alpn_, alpn_.size());
     }
 
     void set_host(const std::string& host) {
         host_ = host;
-        SSL_set_tlsext_host_name(handle_, host_.c_str());
-        SSL_set1_host(handle_, host_.c_str());
     }
 };
 

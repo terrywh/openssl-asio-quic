@@ -12,8 +12,6 @@ static std::string payload {
 };
 
 boost::asio::awaitable<void> run(boost::asio::io_context& io) {
-    quic::basic_endpoints<quic::proto>::iterator::difference_type x;
-
     boost::asio::ssl::context sslctx {SSL_CTX_new(OSSL_QUIC_client_method())};
     sslctx.set_verify_mode(boost::asio::ssl::context_base::verify_none);
     sslctx.set_default_verify_paths();
@@ -21,7 +19,6 @@ boost::asio::awaitable<void> run(boost::asio::io_context& io) {
     quic::connection conn {io, sslctx};
     conn.set_alpn(quic::application_protocol_list {"http/1.0"});
     conn.set_host("localhost");
-
 
     auto es = quic::resolve("localhost", "8443");
     co_await quic::async_connect(conn, es, boost::asio::use_awaitable);

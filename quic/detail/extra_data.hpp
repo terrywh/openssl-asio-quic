@@ -22,6 +22,16 @@ struct extra_data {
     static void attach(SSL* ssl, T* ptr) {
         if (ssl) SSL_set_ex_data(ssl, ext_idx(), ptr);
     }
+
+    static T* detach(SSL* ssl) {
+        void* ptr = nullptr;
+        int idx = ext_idx();
+        if (ssl) {
+            ptr = SSL_get_ex_data(ssl, idx);
+            SSL_set_ex_data(ssl, idx, nullptr);
+        }
+        return reinterpret_cast<T*>(ptr);
+    }
 };
 
 } // namespace detail

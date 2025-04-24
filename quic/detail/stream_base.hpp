@@ -24,7 +24,6 @@ struct stream_base {
     }
 
     ~stream_base() {
-        SSL_free(handle_);
         conn_->del_ref();
     }
 

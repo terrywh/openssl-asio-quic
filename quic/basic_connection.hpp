@@ -53,10 +53,15 @@ public:
     ~basic_connection() {
         base_->del_ref();
     }
-
+    /**
+     * 设置用于应用层的交互协议列表
+     */
     void set_alpn(const application_protocol_list& alpn) {
         base_->set_alpn(alpn);
     }
+    /**
+     * 目标域名
+     */
     void set_host(const std::string& host) {
         base_->set_host(host);
     }

@@ -12,8 +12,8 @@ void run(boost::asio::io_context& io) {
     sslctx.set_default_verify_paths();
 
     quic::connection conn {io, sslctx};
-    conn.set_alpn(quic::application_protocol_list {"http/1.0"});
     conn.set_host("localhost");
+    conn.set_alpn(quic::application_protocol_list {"http/1.0"});
 
     quic::connect(conn, quic::resolve("localhost", "8443"));
     
@@ -76,17 +76,8 @@ int CRYPTO_EX_dup_cb (CRYPTO_EX_DATA *to, const CRYPTO_EX_DATA *from,
 int CRYPTO_SSL_IDX;
 
 int main(int argc, char* argv[]) {
-    CRYPTO_SSL_IDX = SSL_get_ex_new_index(0, nullptr, nullptr, &CRYPTO_EX_dup_cb, &CRYPTO_EX_free_cb);
-
-    boost::asio::ssl::context ctx {SSL_CTX_new(OSSL_QUIC_client_method())};
-   
-    SSL* ssl = SSL_new(ctx.native_handle());
-    SSL_set_default_stream_mode(ssl, SSL_DEFAULT_STREAM_MODE_NONE);
-    SSL_set_ex_data(ssl, CRYPTO_SSL_IDX, new Demo());
-
-    SSL_free(ssl);
-    // boost::asio::io_context io;
-    // run(io);
-    // io.run();
+    boost::asio::io_context io;
+    run(io);
+    io.run();
     return 0;
 }
