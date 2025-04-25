@@ -30,6 +30,7 @@ void run(boost::asio::io_context& io) {
 
     std::size_t size = stream.write_some(boost::asio::buffer(payload));
     std::cout << std::format("{:-^64}\n", "request wrote");
+
     stream.shutdown(boost::asio::socket_base::shutdown_send);
 
     payload.resize(1024);

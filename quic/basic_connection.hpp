@@ -16,6 +16,7 @@ namespace quic {
 
 template <class Protocol, class Executor = boost::asio::any_io_executor>
 class basic_connection {
+public:
     template <class Protocol1, class Executor1, class CompletionToken>
     friend auto async_connect(basic_connection<Protocol1, Executor1>& conn,
         const basic_endpoints<Protocol1>& addr, CompletionToken&& token);
@@ -45,6 +46,10 @@ public:
     template <class ExecutorContext>
     basic_connection(ExecutorContext& ex, boost::asio::ssl::context& ctx)
     : base_(new detail::connection_base<Protocol, Executor>(ex, ctx)) { }
+
+    executor_type& get_executor() const {
+        return base_->strand_;
+    }
 
     SSL* native_handle() const {
         return base_->ssl_;
@@ -81,14 +86,14 @@ public:
     // }
 
     void create_stream(basic_stream<Protocol, Executor>& stream) {
-        stream.base_ = std::make_shared<detail::stream_base<Protocol, Executor>>(base_);
+        stream.base_ = std::make_shared<detail::stream_base<Protocol, Executor>>();
         detail::do_create_stream<Protocol, Executor>{base_, stream.base_}();
     }
 
     // 参考 async_connect 实现 async_create_stream
     template <class CompletionToken>
     auto async_create_stream(basic_stream<Protocol, Executor>& stream, CompletionToken&& token) {
-        stream.base_ = std::make_shared<detail::stream_base<Protocol, Executor>>(base_);
+        stream.base_ = std::make_shared<detail::stream_base<Protocol, Executor>>();
         return boost::asio::async_compose<CompletionToken, void(boost::system::error_code)>(
             detail::do_async_create_stream<Protocol, Executor>{base_, stream.base_}, token);
     }

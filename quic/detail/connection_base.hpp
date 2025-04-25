@@ -83,6 +83,7 @@ struct connection_base {
         timer_.async_wait(boost::asio::bind_executor(strand_, [this] (boost::system::error_code error) {
             if (error) return;
             
+            // SSL_handle_events(handle_);
             invoke_waitable(error);
             socket_.cancel();
         }));

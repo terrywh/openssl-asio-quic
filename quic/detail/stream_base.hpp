@@ -10,19 +10,12 @@ template <class Protocol, class Executor>
 struct stream_base {
 
     using protocol_type = typename std::decay<Protocol>::type;
-    using executor_type = typename std::decay<Executor>::type;
     using connection_type = connection_base<Protocol, Executor>;
+    using executor_type = connection_type::executor_type;
     using socket_type = boost::asio::basic_datagram_socket<Protocol, Executor>;
 
-    std::shared_ptr<connection_type> conn_;
-    SSL* handle_;
-
-    stream_base(std::shared_ptr<connection_type> conn)
-    : conn_(conn)
-    , handle_(nullptr) {
-        
-    }
-
+    SSL* handle_ = nullptr;
+    
     ~stream_base() {
         SSL_free(handle_);
     }
