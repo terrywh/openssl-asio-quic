@@ -14,24 +14,16 @@ struct stream_base {
     using connection_type = connection_base<Protocol, Executor>;
     using socket_type = boost::asio::basic_datagram_socket<Protocol, Executor>;
 
-    connection_base<Protocol, Executor>* conn_;
+    std::shared_ptr<connection_type> conn_;
     SSL* handle_;
 
-    stream_base(connection_base<Protocol, Executor>* conn)
+    stream_base(std::shared_ptr<connection_type> conn)
     : conn_(conn)
     , handle_(nullptr) {
-        conn_->add_ref();
+        
     }
 
     ~stream_base() {
-        conn_->del_ref();
-    }
-
-    void add_ref() {
-        SSL_up_ref(handle_);
-    }
-
-    void del_ref() {
         SSL_free(handle_);
     }
 };

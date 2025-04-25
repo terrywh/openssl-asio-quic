@@ -17,10 +17,10 @@ struct do_connect_base {
     using connection_type = connection_base<Protocol, Executor>;
     using endpoint_type = connection_type::endpoint_type;
 
-    connection_base<Protocol, Executor>* conn_;
+    std::shared_ptr<connection_type> conn_;
     endpoint_type addr_;
 
-    do_connect_base(connection_base<Protocol, Executor>* conn, const endpoint_type& addr)
+    do_connect_base(std::shared_ptr<connection_type> conn, const endpoint_type& addr)
     : conn_(conn)
     , addr_(addr) {}
 
@@ -29,7 +29,6 @@ struct do_connect_base {
     void create(bool blocking) const {
         conn_->handle_ = SSL_new(conn_->sslctx_.native_handle());
         SSL_set_default_stream_mode(conn_->handle_, SSL_DEFAULT_STREAM_MODE_NONE);
-        extra_data<connection_type>::attach(conn_->handle_, conn_);
 
         SSL_set_alpn_protos(conn_->handle_, conn_->alpn_, conn_->alpn_.size());
         SSL_set_tlsext_host_name(conn_->handle_, conn_->host_.c_str());
@@ -48,14 +47,13 @@ struct do_connect: public do_connect_base<Protocol, Executor> {
     using connection_type = typename do_connect_base<Protocol, Executor>::connection_type;
     using endpoint_type = typename do_connect_base<Protocol, Executor>::endpoint_type;
 
-    do_connect(connection_type* conn, const endpoint_type& addr)
+    do_connect(std::shared_ptr<connection_type> conn, const endpoint_type& addr)
     : do_connect_base<Protocol,Executor>(conn, addr) {}
 
     void operator()() const {
         this->conn_->socket_.close();
         this->conn_->socket_.connect(this->addr_);
 
-        extra_data<connection_type>::detach(this->conn_->handle_);
         SSL_free(this->conn_->handle_);
         this->create(true);
 
@@ -80,7 +78,7 @@ struct do_async_connect: public do_connect_base<Protocol, Executor> {
 
     mutable enum {connecting, binding, handshaking} state_;
     
-    do_async_connect(connection_base<Protocol, Executor>* conn, const endpoint_type& addr)
+    do_async_connect(std::shared_ptr<connection_type> conn, const endpoint_type& addr)
     : do_connect_base<Protocol,Executor>(conn, addr)
     , state_(connecting) { }
 
@@ -101,7 +99,6 @@ struct do_async_connect: public do_connect_base<Protocol, Executor> {
             state_ = handshaking;
             this->conn_->socket_.native_non_blocking(true);
 
-            extra_data<connection_type>::detach(this->conn_->handle_);
             SSL_free(this->conn_->handle_);
             this->create(false);
             SSL_set_blocking_mode(this->conn_->handle_, 0);
@@ -130,15 +127,16 @@ struct do_async_connect: public do_connect_base<Protocol, Executor> {
 
 template <class Protocol, class Executor, class EndpointSequence>
 struct do_async_connect_seq {
+    using connection_type = connection_base<Protocol, Executor>;
     using endpoint_seq = typename std::decay<EndpointSequence>::type;
     using iterator_type = typename EndpointSequence::iterator;
     using difference_type = iterator_type::difference_type;
    
-    connection_base<Protocol, Executor>* conn_;
+    std::shared_ptr<connection_type> conn_;
     endpoint_seq addr_;
     mutable difference_type start_;
 
-    do_async_connect_seq(connection_base<Protocol, Executor>* conn, const EndpointSequence& addr)
+    do_async_connect_seq(std::shared_ptr<connection_type> conn, const EndpointSequence& addr)
     : conn_(conn)
     , addr_(addr)
     , start_(0) {}
@@ -168,20 +166,21 @@ struct do_async_connect_seq {
         }
 
         boost::asio::async_compose<Self, void (boost::system::error_code)>(
-            detail::do_async_connect{conn_, *i}, self);
+            detail::do_async_connect<Protocol, Executor>{conn_, *i}, self);
     }
 };
 
 template <class Protocol, class Executor, class EndpointSequence>
 struct do_connect_seq {
+    using connection_type = connection_base<Protocol, Executor>;
     using endpoint_seq = typename std::decay<EndpointSequence>::type;
     using endpoint_type = typename EndpointSequence::value_type;
 
 
-    connection_base<Protocol, Executor>* conn_;
+    std::shared_ptr<connection_type> conn_;
     EndpointSequence addr_;
 
-    do_connect_seq(connection_base<Protocol, Executor>* conn, const EndpointSequence& eps)
+    do_connect_seq(std::shared_ptr<connection_type> conn, const EndpointSequence& eps)
     : conn_(conn)
     , addr_(eps) {}
 

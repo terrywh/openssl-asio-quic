@@ -12,34 +12,38 @@ struct do_create_stream {
     using connection_type = connection_base<Protocol, Executor>;
     using stream_type = stream_base<Protocol, Executor>;
 
-    connection_type* conn_;
-    stream_type*   stream_;
+    std::shared_ptr<connection_type> conn_;
+    std::shared_ptr<stream_type>   stream_;
 
-    do_create_stream(connection_type* conn, stream_type* stream)
+    do_create_stream(std::shared_ptr<connection_type> conn, std::shared_ptr<stream_type> stream)
     : conn_(conn)
     , stream_(stream) {
 
     }
 
     void operator()() const {
-        stream_->handle_ = SSL_new_stream(conn_->handle_, SSL_STREAM_FLAG_NO_BLOCK);
-        if (stream_->handle_ == nullptr) {
-            throw boost::system::system_error(SSL_get_error(conn_->handle_, 0), boost::asio::error::get_ssl_category());
+        if (stream_->handle_ = SSL_new_stream(conn_->handle_, SSL_STREAM_FLAG_NO_BLOCK); stream_->handle_ == nullptr) {
+            int err = SSL_get_error(this->conn_->handle_, 0);
+            switch (err) {
+            case SSL_ERROR_SYSCALL:
+                throw boost::system::system_error{errno, boost::asio::error::get_system_category()};
+                break;
+            default:
+                throw boost::system::system_error{err, boost::asio::error::get_ssl_category()};
+            }
         }
-        extra_data<stream_type>::attach(stream_->handle_, stream_);
     }
 };
-    
 
 template <class Protocol, class Executor>
 struct do_async_create_stream {
     using connection_type = connection_base<Protocol, Executor>;
     using stream_type = stream_base<Protocol, Executor>;
 
-    connection_type* conn_;
-    stream_type*   stream_;
+    std::shared_ptr<connection_type> conn_;
+    std::shared_ptr<stream_type>   stream_;
 
-    do_async_create_stream(connection_type* conn, stream_type* stream)
+    do_async_create_stream(std::shared_ptr<connection_type> conn, std::shared_ptr<stream_type> stream)
     : conn_(conn)
     , stream_(stream) {
 
@@ -51,11 +55,21 @@ struct do_async_create_stream {
             self.complete(error);
             return;
         }
-        if (stream_->handle_ = SSL_new_stream(conn_, SSL_STREAM_FLAG_NO_BLOCK); stream_->handle_ == nullptr) {
-            conn_->handle_ssl_error(SSL_get_error(conn_, 0), std::move(self));
+        if (stream_->handle_ = SSL_new_stream(conn_->handle_, SSL_STREAM_FLAG_NO_BLOCK); stream_->handle_ == nullptr) {
+            int err = SSL_get_error(this->conn_->handle_, 0);
+            switch (err) {
+            case SSL_ERROR_WANT_READ:
+            case SSL_ERROR_WANT_WRITE:
+                this->conn_->async_wait(std::move(self));
+                break;
+            case SSL_ERROR_SYSCALL:
+                self.complete(boost::system::error_code{errno, boost::asio::error::get_system_category()});
+                break;
+            default:
+                self.complete(boost::system::error_code{err, boost::asio::error::get_ssl_category()});
+            }
             return;
         }
-        extra_data<stream_type>::attach(stream_->handle_, stream_);
         self.complete(error);
     }
 };

@@ -5,7 +5,6 @@
 #include "asio.hpp"
 #include "../alpn.hpp"
 #include "../basic_endpoint.hpp"
-#include "extra_data.hpp"
 
 #include <chrono>
 #include <vector>
@@ -34,7 +33,7 @@ struct connection_base {
 
     template <class ExecutorContext>
     connection_base(ExecutorContext& ex, boost::asio::ssl::context& ctx)
-    : strand_(ex.get_executor()) 
+    : strand_(ex.get_executor())
     , sslctx_(ctx) 
     , handle_(nullptr)
     , socket_(strand_)
@@ -45,12 +44,8 @@ struct connection_base {
         set_host("localhost");
     }
 
-    void add_ref() {
-        SSL_up_ref(handle_);
-    }
-    // 引用数降为零时，将删除当前对象
-    void del_ref() {
-        SSL_free(handle_); 
+    ~connection_base() {
+        SSL_free(handle_);
     }
 
     void invoke_waitable(const boost::system::error_code& error) {
@@ -61,6 +56,7 @@ struct connection_base {
             handler(error); // handler 调用时可能对 waitable_ 追加
         }
     }
+    
     void async_wait(boost::asio::any_completion_handler<void (boost::system::error_code)> handler) {
         waitable_.push_back(std::move(handler));
         if (waitable_.size() > 1) return;

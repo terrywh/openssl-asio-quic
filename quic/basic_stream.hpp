@@ -13,17 +13,15 @@ class basic_stream {
     template <class Protocol1, class Executor1>
     friend class basic_connection;
 
+    using stream_type = detail::stream_base<Protocol, Executor>;
+
 private:
-    detail::stream_base<Protocol, Executor>* base_ = nullptr;
+    std::shared_ptr<stream_type> base_;
     
 public:
 
     SSL* native_handle() const {
         return base_->handle_;
-    }
-
-    ~basic_stream() {
-        base_->del_ref();
     }
 
     template <class MutableBufferSequence>
