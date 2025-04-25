@@ -69,13 +69,13 @@ public:
     }
 
     void connect(const endpoint_type& addr) {
-        detail::do_connect{base_, addr}();
+        detail::do_connect{base_.get(), addr}();
     }
 
     template <class CompletionToken>
     auto async_connect(const endpoint_type& addr, CompletionToken&& token) {
         return boost::asio::async_compose<CompletionToken, void (boost::system::error_code)>(
-            detail::do_async_connect{base_, addr}, token);
+            detail::do_async_connect{base_.get(), addr}, token);
     }
 
     // accept_stream(basic_stream<Protocol, Executor>& stream) {
@@ -86,16 +86,18 @@ public:
     // }
 
     void create_stream(basic_stream<Protocol, Executor>& stream) {
+        stream.conn_ = base_;
         stream.base_ = std::make_shared<detail::stream_base<Protocol, Executor>>();
-        detail::do_create_stream<Protocol, Executor>{base_, stream.base_}();
+        detail::do_create_stream<Protocol, Executor>{base_.get(), stream.base_.get()}();
     }
 
     // 参考 async_connect 实现 async_create_stream
     template <class CompletionToken>
     auto async_create_stream(basic_stream<Protocol, Executor>& stream, CompletionToken&& token) {
+        stream.conn_ = base_;
         stream.base_ = std::make_shared<detail::stream_base<Protocol, Executor>>();
         return boost::asio::async_compose<CompletionToken, void(boost::system::error_code)>(
-            detail::do_async_create_stream<Protocol, Executor>{base_, stream.base_}, token);
+            detail::do_async_create_stream<Protocol, Executor>{base_.get(), stream.base_.get()}, token);
     }
 
     template <class Protocol1, class Executor1>

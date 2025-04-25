@@ -2,6 +2,8 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+// #include <boost/asio/read_until.hpp>
+// #include <boost/asio/buffer.hpp>
 #include <iostream>
 #include <format>
 
@@ -38,14 +40,15 @@ boost::asio::awaitable<void> run(boost::asio::io_context& io) {
 
     std::size_t size = co_await stream.async_write_some(boost::asio::buffer(payload), boost::asio::use_awaitable);
     std::cout << std::format("{:-^64}\n", "request wrote");
-
     stream.shutdown(boost::asio::socket_base::shutdown_send);
 
     payload.resize(1024);
     size = co_await stream.async_read_some(boost::asio::buffer(payload), boost::asio::use_awaitable);
     payload.resize(size);
+
     std::cout << std::format("{:-^64}\n", "response read");
     std::cout << payload << "\n";
+
 DONE:
     co_return;
 }

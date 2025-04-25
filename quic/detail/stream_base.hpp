@@ -2,6 +2,7 @@
 #define QUIC_DETAIL_STREAM_BASE_H
 
 #include "connection_base.hpp"
+#include <iostream>
 
 namespace quic {
 namespace detail {

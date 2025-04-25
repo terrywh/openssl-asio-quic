@@ -12,12 +12,12 @@ auto async_connect(basic_connection<Protocol, Executor>& conn, const basic_endpo
     CompletionToken&& token) {
 
     return boost::asio::async_compose<CompletionToken, void (boost::system::error_code)>(
-        detail::do_async_connect_seq{conn.base_, eps}, token);
+        detail::do_async_connect_seq{conn.base_.get(), eps}, token);
 }
 
 template <class Protocol, class Executor>
 auto connect(basic_connection<Protocol, Executor>& conn, const basic_endpoints<Protocol>& eps) {
-    return detail::do_connect_seq<Protocol, Executor, basic_endpoints<Protocol>>{conn.base_, eps}();
+    return detail::do_connect_seq<Protocol, Executor, basic_endpoints<Protocol>>{conn.base_.get(), eps}();
 }
 
 } // namespace quic

@@ -17,10 +17,10 @@ struct do_connect_base {
     using connection_type = connection_base<Protocol, Executor>;
     using endpoint_type = connection_type::endpoint_type;
 
-    std::shared_ptr<connection_type> conn_;
+    connection_type* conn_;
     endpoint_type addr_;
 
-    do_connect_base(std::shared_ptr<connection_type> conn, const endpoint_type& addr)
+    do_connect_base(connection_type* conn, const endpoint_type& addr)
     : conn_(conn)
     , addr_(addr) {}
 
@@ -47,7 +47,7 @@ struct do_connect: public do_connect_base<Protocol, Executor> {
     using connection_type = typename do_connect_base<Protocol, Executor>::connection_type;
     using endpoint_type = typename do_connect_base<Protocol, Executor>::endpoint_type;
 
-    do_connect(std::shared_ptr<connection_type> conn, const endpoint_type& addr)
+    do_connect(connection_type* conn, const endpoint_type& addr)
     : do_connect_base<Protocol,Executor>(conn, addr) {}
 
     void operator()() const {
@@ -78,7 +78,7 @@ struct do_async_connect: public do_connect_base<Protocol, Executor> {
 
     mutable enum {connecting, binding, handshaking} state_;
     
-    do_async_connect(std::shared_ptr<connection_type> conn, const endpoint_type& addr)
+    do_async_connect(connection_type* conn, const endpoint_type& addr)
     : do_connect_base<Protocol,Executor>(conn, addr)
     , state_(connecting) { }
 
@@ -132,11 +132,11 @@ struct do_async_connect_seq {
     using iterator_type = typename EndpointSequence::iterator;
     using difference_type = iterator_type::difference_type;
    
-    std::shared_ptr<connection_type> conn_;
+    connection_type* conn_;
     endpoint_seq addr_;
     mutable difference_type start_;
 
-    do_async_connect_seq(std::shared_ptr<connection_type> conn, const EndpointSequence& addr)
+    do_async_connect_seq(connection_type* conn, const EndpointSequence& addr)
     : conn_(conn)
     , addr_(addr)
     , start_(0) {}
@@ -177,10 +177,10 @@ struct do_connect_seq {
     using endpoint_type = typename EndpointSequence::value_type;
 
 
-    std::shared_ptr<connection_type> conn_;
+    connection_type* conn_;
     EndpointSequence addr_;
 
-    do_connect_seq(std::shared_ptr<connection_type> conn, const EndpointSequence& eps)
+    do_connect_seq(connection_type* conn, const EndpointSequence& eps)
     : conn_(conn)
     , addr_(eps) {}
 

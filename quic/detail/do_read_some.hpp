@@ -102,6 +102,9 @@ READ_NEXT:
                 case SSL_ERROR_SYSCALL:
                     self.complete(boost::system::error_code{errno, boost::asio::error::get_system_category()}, read_);
                     break;
+                case SSL_ERROR_ZERO_RETURN:
+                    self.complete(boost::system::error_code{SSL_R_STREAM_FINISHED, boost::asio::error::get_ssl_category()}, read_);
+                    break;
                 default:
                     self.complete(boost::system::error_code{err, boost::asio::error::get_ssl_category()}, read_);
                 }

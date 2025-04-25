@@ -12,10 +12,10 @@ struct do_create_stream {
     using connection_type = connection_base<Protocol, Executor>;
     using stream_type = stream_base<Protocol, Executor>;
 
-    std::shared_ptr<connection_type> conn_;
-    std::shared_ptr<stream_type>   stream_;
+    connection_type* conn_;
+    stream_type*   stream_;
 
-    do_create_stream(std::shared_ptr<connection_type> conn, std::shared_ptr<stream_type> stream)
+    do_create_stream(connection_type* conn, stream_type* stream)
     : conn_(conn)
     , stream_(stream) {
 
@@ -40,10 +40,10 @@ struct do_async_create_stream {
     using connection_type = connection_base<Protocol, Executor>;
     using stream_type = stream_base<Protocol, Executor>;
 
-    std::shared_ptr<connection_type> conn_;
-    std::shared_ptr<stream_type>   stream_;
+    connection_type* conn_;
+    stream_type*   stream_;
 
-    do_async_create_stream(std::shared_ptr<connection_type> conn, std::shared_ptr<stream_type> stream)
+    do_async_create_stream(connection_type* conn, stream_type* stream)
     : conn_(conn)
     , stream_(stream) {
 
