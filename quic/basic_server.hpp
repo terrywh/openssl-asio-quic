@@ -3,54 +3,37 @@
 
 #include "detail/ssl.hpp"
 #include "detail/asio.hpp"
-#include "basic_connection.hpp"
+#include "detail/attached.hpp"
+#include "basic_endpoint.hpp"
+#include "impl/basic_server.hpp"
 
 namespace quic {
 
 template <class Protocol, class Executor = boost::asio::any_io_executor>
-class basic_server {
+class basic_server: public detail::attached< impl::basic_server<Protocol, Executor> > {
 public:
     using protocol_type = typename std::decay<Protocol>::type;
     using executor_type = typename std::decay<Executor>::type;
-
+    using implement_type = impl::basic_server<Protocol, Executor>;
 private:
-    executor_type ex_;
-    boost::asio::ssl::context& ctx_;
-    boost::asio::basic_datagram_socket<Protocol, Executor> socket_;
-    SSL* listener_;
+    SSL*         handler_;
+    implement_type* impl_;
 
 public:
-
-    explicit basic_server(executor_type& ex, boost::asio::ssl::context& ctx, boost::asio::ip::basic_endpoint<Protocol> bind)
-    : ex_(ex)
-    , ctx_(ctx) {
-        boost::asio::ip::udp::socket socket {ex, bind};
-        if (listener_ = SSL_new_listener(ctx_.native_handle(), 0); listener_ == nullptr) {
+    template <class ExecutionContext>
+    basic_server(ExecutionContext& ex, boost::asio::ssl::context& ctx) {
+        if (handler_ = SSL_new_listener(ctx.native_handle(), 0); handler_ == nullptr) {
             throw std::runtime_error("failed to create ssl listener");
         }
-        SSL_set_fd(listener_, socket.native_handle());
-        socket.release();
+        impl_ = detail::attached<implement_type>::emplace_attached(handler_, ex, ctx);
     }
 
-    void listen() {
-        if (int r = SSL_listen(listener_); r != SSL_ERROR_NONE) {
-            throw boost::system::system_error(SSL_get_error(listener_, r), boost::asio::error::get_ssl_category());
-        }
+    void bind(const basic_endpoint<Protocol>& addr) {
+        impl_->bind(handler_, addr);
     }
 
-    template <class Executor1>
-    void accept(basic_connection<Protocol, Executor1>& conn) {
-        ERR_clear_error();
-        if (conn.conn_ = SSL_accept_connection(listener_, 0); conn.conn_ == nullptr) {
-            throw std::runtime_error("failed to accept connection");
-        }
-        SSL_set_default_stream_mode(conn.conn_, SSL_DEFAULT_STREAM_MODE_NONE);
-    }
-
-    static int select(SSL* ssl, const unsigned char* out, unsigned char* outlen, const unsigned char* in, unsigned int inlen, void* arg) {
-        basic_server* self = static_cast<basic_server*>(arg);
-
-        return 0;
+    ~basic_server() {
+        SSL_free(handler_); // 引用计数释放关联实现
     }
 };
 

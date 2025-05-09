@@ -24,20 +24,35 @@ public:
     basic_endpoint()
     : addr_(nullptr) {}
 
+    basic_endpoint(const boost::asio::ip::address& addr, std::uint16_t port)
+    : addr_(BIO_ADDR_new()) {
+        int r = 0;
+        if (addr.is_v6()) {
+            auto v6 = addr.to_v6();
+            r = BIO_ADDR_rawmake(addr_, AF_INET6, v6.to_bytes().data(), sizeof(in6_addr), htons(port));
+        } else {
+            auto v4 = addr.to_v4();
+            r = BIO_ADDR_rawmake(addr_, AF_INET, v4.to_bytes().data(), sizeof(in_addr), htons(port));
+        }
+        if (!r) throw boost::system::system_error{
+            boost::asio::error::address_family_not_supported,
+            boost::asio::error::get_system_category()};
+    }
+
     basic_endpoint(const basic_endpoint& e)
     : addr_(BIO_ADDR_dup(e.addr_)) {}
 
     basic_endpoint(basic_endpoint&& e)
     : addr_(BIO_ADDR_dup(e.addr_)) {
-        
+
     }
 
     ~basic_endpoint() {
         if (addr_ != nullptr) BIO_ADDR_free(addr_);
-    }    
+    }
 
     protocol_type protocol() const {
-        return addr_ == nullptr ? protocol_type::unspecified() : 
+        return addr_ == nullptr ? protocol_type::unspecified() :
             BIO_ADDR_family(addr_) == AF_INET6 ? protocol_type::v6() : protocol_type::v4();
     }
 
