@@ -38,3 +38,8 @@ target("quic-block-server")
     add_deps("quic")
     add_rules("mode.debug", "mode.release")
     add_files("test/block_server.cpp")
+
+target("test")
+    set_kind("binary")
+    add_rules("mode.debug", "mode.release")
+    add_files("test/test.cpp")

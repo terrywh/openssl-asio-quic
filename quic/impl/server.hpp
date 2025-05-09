@@ -4,23 +4,22 @@
 #include "../detail/asio.hpp"
 #include "../detail/ssl.hpp"
 #include "../proto.hpp"
-#include "../basic_endpoint.hpp"
+#include "../endpoint.hpp"
 #include <iostream>
 
 namespace quic {
 namespace impl {
 
-class server {
-
-private:
+struct server {
+    SSL*                                                        handle_;
     boost::asio::strand<boost::asio::io_context::executor_type> strand_;
-    boost::asio::ssl::context&                                     ctx_;
+    boost::asio::ssl::context&                                  sslctx_;
     boost::asio::basic_datagram_socket<quic::proto>             socket_;
 
-public:
-    server(boost::asio::io_context& io, boost::asio::ssl::context& ctx)
-    : strand_(io.get_executor())
-    , ctx_(ctx)
+    server(SSL* handle, boost::asio::io_context& io, boost::asio::ssl::context& ctx)
+    : handle_(handle)
+    , strand_(io.get_executor())
+    , sslctx_(ctx)
     , socket_(strand_)  {
         std::cout << "+basic_server\n";
     }
@@ -28,16 +27,15 @@ public:
         std::cout << "-basic_server\n";
     }
 
-    template <class Protocol>
-    void bind(SSL* handler, const basic_endpoint<Protocol>& addr) {
+    void bind(endpoint addr) {
         socket_.open(addr.protocol());
         socket_.bind(addr);
-        SSL_set_fd(handler, socket_.native_handle());
+        SSL_set_fd(handle_, socket_.native_handle());
     }
 
-    void listen(SSL* handler) {
-        if (int r = SSL_listen(handler); r != SSL_ERROR_NONE) {
-            throw boost::system::system_error(SSL_get_error(handler, r), boost::asio::error::get_ssl_category());
+    void listen() {
+        if (int r = SSL_listen(handle_); r != SSL_ERROR_NONE) {
+            throw boost::system::system_error(SSL_get_error(handle_, r), boost::asio::error::get_ssl_category());
         }
     }
 

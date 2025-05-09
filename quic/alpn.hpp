@@ -1,7 +1,8 @@
-#ifndef ASIO_QUIC_DETAIL_ALPN_H
-#define ASIO_QUIC_DETAIL_ALPN_H
+#ifndef ASIO_QUIC_ALPN_H
+#define ASIO_QUIC_ALPN_H
 
 #include <initializer_list>
+#include <string>
 #include <vector>
 
 namespace quic {
@@ -66,4 +67,4 @@ public:
 
 } // namespace quic
 
-#endif // ASIO_QUIC_DETAIL_ALPN_H
+#endif // ASIO_QUIC_ALPN_H

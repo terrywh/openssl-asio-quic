@@ -2,7 +2,6 @@
 #include <format>
 #include <iostream>
 
-
 void run(boost::asio::io_context& io) {
     boost::asio::ssl::context sslctx {SSL_CTX_new(OSSL_QUIC_client_method())};
     sslctx.set_verify_mode(boost::asio::ssl::context_base::verify_none);
@@ -13,7 +12,7 @@ void run(boost::asio::io_context& io) {
     conn.set_alpn(quic::application_protocol_list {"http/1.0"});
 
     quic::connect(conn, quic::resolve("localhost", "8443"));
-    
+
     std::cout << std::format("{:-^64}\n", "connection established");
 
     std::string payload {

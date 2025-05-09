@@ -57,11 +57,10 @@
             ]
         },
         {
-            "name": "(gdb) quic-test",
-            "preLaunchTask": "C/C++: build",
+            "name": "(gdb) test",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/linux/x86_64/debug/quic-test",
+            "program": "${workspaceFolder}/build/linux/x86_64/debug/test",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

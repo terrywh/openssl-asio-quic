@@ -1,23 +1,21 @@
-#ifndef QUIC_DETAIL_WRITE_SOME_H
-#define QUIC_DETAIL_WRITE_SOME_H
+#ifndef QUIC_IMPL_STREAM_WRITE_SOME_H
+#define QUIC_IMPL_STREAM_WRITE_SOME_H
 
-#include "connection_base.hpp"
-#include "stream_base.hpp"
+#include "connection.hpp"
+#include "stream.hpp"
 
 namespace quic {
-namespace detail {
+namespace impl {
 
-template <class Protocol, class Executor, class ConstBufferSequence>
-struct do_write_some {
-    using connection_type = connection_base<Protocol, Executor>;
-    using stream_type = stream_base<Protocol, Executor>;
+template <class ConstBufferSequence>
+struct stream_write_some {
     using const_buffers_type = typename std::decay<ConstBufferSequence>::type;
 
-    connection_type* conn_;
-    stream_type* stream_;
+    impl::connection* conn_;
+    impl::stream* stream_;
     const const_buffers_type& buffers_;
 
-    do_write_some(connection_type* conn, stream_type* stream, const const_buffers_type& buffers)
+    stream_write_some(impl::connection* conn, impl::stream* stream, const const_buffers_type& buffers)
     : conn_(conn)
     , stream_(stream)
     , buffers_(buffers) {}
@@ -43,21 +41,19 @@ struct do_write_some {
 };
 
 
-template <class Protocol, class Executor, class ConstBufferSequence>
-struct do_async_write_some {
-    using connection_type = connection_base<Protocol, Executor>;
-    using stream_type = stream_base<Protocol, Executor>;
+template <class ConstBufferSequence>
+struct stream_write_some_async {
     using const_buffers_type = typename std::decay<ConstBufferSequence>::type;
 
-    connection_type* conn_;
-    stream_type* stream_;
+    impl::connection* conn_;
+    impl::stream* stream_;
     const const_buffers_type& buffers_;
     std::size_t wrote_;
     std::size_t start_;
     enum {preparing, writing} state_;
     boost::asio::const_buffer buffer_;
 
-    do_async_write_some(connection_type* conn, stream_type* stream, const const_buffers_type& buffers)
+    stream_write_some_async(impl::connection* conn, impl::stream* stream, const const_buffers_type& buffers)
     : conn_(conn)
     , stream_(stream)
     , buffers_(buffers)
@@ -68,7 +64,7 @@ struct do_async_write_some {
     boost::asio::const_buffer next_buffer() {
         auto i = boost::asio::buffer_sequence_begin(buffers_);
         std::advance(i, start_++);
-        if (i == boost::asio::buffer_sequence_end(buffers_)) 
+        if (i == boost::asio::buffer_sequence_end(buffers_))
             return {};
         return *i;
     }
@@ -112,7 +108,7 @@ WRITE_NEXT:
     }
 };
 
-} // namespace detail
+} // namespace impl
 } // namespace quic
 
-#endif // QUIC_DETAIL_WRITE_SOME_H
+#endif // QUIC_IMPL_STREAM_WRITE_SOME_H

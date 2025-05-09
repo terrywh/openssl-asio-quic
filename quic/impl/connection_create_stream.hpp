@@ -1,25 +1,19 @@
-#ifndef QUIC_DETAIL_CREATE_STREAM_H
-#define QUIC_DETAIL_CREATE_STREAM_H
+#ifndef QUIC_IMPL_CONNECTION_CREATE_STREAM_H
+#define QUIC_IMPL_CONNECTION_CREATE_STREAM_H
 
-#include "connection_base.hpp"
-#include "stream_base.hpp"
+#include "connection.hpp"
+#include "stream.hpp"
 
 namespace quic {
-namespace detail {
+namespace impl {
 
-template <class Protocol, class Executor>
-struct do_create_stream {
-    using connection_type = connection_base<Protocol, Executor>;
-    using stream_type = stream_base<Protocol, Executor>;
+struct connection_create_stream {
+    impl::connection* conn_;
+    impl::stream*   stream_;
 
-    connection_type* conn_;
-    stream_type*   stream_;
-
-    do_create_stream(connection_type* conn, stream_type* stream)
+    connection_create_stream(impl::connection* conn, impl::stream* stream)
     : conn_(conn)
-    , stream_(stream) {
-
-    }
+    , stream_(stream) { }
 
     void operator()() const {
         if (stream_->handle_ = SSL_new_stream(conn_->handle_, SSL_STREAM_FLAG_NO_BLOCK); stream_->handle_ == nullptr) {
@@ -35,19 +29,13 @@ struct do_create_stream {
     }
 };
 
-template <class Protocol, class Executor>
-struct do_async_create_stream {
-    using connection_type = connection_base<Protocol, Executor>;
-    using stream_type = stream_base<Protocol, Executor>;
+struct connection_create_stream_async {
+    impl::connection* conn_;
+    impl::stream*   stream_;
 
-    connection_type* conn_;
-    stream_type*   stream_;
-
-    do_async_create_stream(connection_type* conn, stream_type* stream)
+    connection_create_stream_async(impl::connection* conn, impl::stream* stream)
     : conn_(conn)
-    , stream_(stream) {
-
-    }
+    , stream_(stream) { }
 
     template <typename Self>
     void operator()(Self& self, boost::system::error_code error = {}) {
@@ -75,7 +63,7 @@ struct do_async_create_stream {
 };
 
 
-} // namespace detail
+} // namespace impl
 } // namespace quic
 
-#endif // QUIC_DETAIL_CREATE_STREAM_H
+#endif // QUIC_IMPL_CONNECTION_CREATE_STREAM_H

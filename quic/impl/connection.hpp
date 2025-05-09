@@ -1,51 +1,41 @@
 #ifndef QUIC_DETAIL_SOCKET_EVENT_H
 #define QUIC_DETAIL_SOCKET_EVENT_H
 
-#include "ssl.hpp"
-#include "asio.hpp"
+#include "../detail/ssl.hpp"
+#include "../detail/asio.hpp"
 #include "../alpn.hpp"
-#include "../basic_endpoint.hpp"
+#include "../proto.hpp"
 
-#include <chrono>
 #include <vector>
 
 namespace quic {
-namespace detail {
+namespace impl {
 
-template <class Protocol, class Executor>
-struct connection_base {
+struct connection {
+    using executor_type = boost::asio::strand<boost::asio::io_context::executor_type>;
 
-    using executor_type = boost::asio::strand<Executor>;
-    using endpoint_type = typename boost::asio::basic_socket<Protocol, Executor>::endpoint_type;
+    SSL*                       handle_;
+    executor_type              strand_;
+    boost::asio::ssl::context& sslctx_;
 
-
-    boost::asio::strand<Executor>                strand_;
-    boost::asio::ssl::context&                   sslctx_;
-
-    SSL*                                         handle_;
-    boost::asio::basic_datagram_socket<Protocol> socket_;
-    boost::asio::steady_timer                     timer_;
+    boost::asio::basic_datagram_socket<quic::proto> socket_;
+    boost::asio::steady_timer                        timer_;
     std::vector<boost::asio::any_completion_handler<void (boost::system::error_code)>> waitable_;
     std::vector<boost::asio::any_completion_handler<void (boost::system::error_code)>> callable_;
 
     application_protocol_list alpn_;
     std::string               host_;
 
-    template <class ExecutorContext>
-    connection_base(ExecutorContext& ex, boost::asio::ssl::context& ctx)
-    : strand_(ex.get_executor())
-    , sslctx_(ctx) 
-    , handle_(nullptr)
+    connection(SSL* handle, boost::asio::io_context& io, boost::asio::ssl::context& ctx)
+    : handle_(handle)
+    , strand_(io.get_executor())
+    , sslctx_(ctx)
     , socket_(strand_)
     , timer_(strand_) {
         callable_.reserve(4);
         waitable_.reserve(4);
         set_alpn(application_protocol_list{"default/1"});
         set_host("localhost");
-    }
-
-    ~connection_base() {
-        SSL_free(handle_);
     }
 
     void invoke_waitable(const boost::system::error_code& error) {
@@ -56,7 +46,7 @@ struct connection_base {
             handler(error); // handler 调用时可能对 waitable_ 追加
         }
     }
-    
+
     void async_wait(boost::asio::any_completion_handler<void (boost::system::error_code)> handler) {
         waitable_.push_back(std::move(handler));
         if (waitable_.size() > 1) return;
@@ -65,35 +55,34 @@ struct connection_base {
             r = SSL_net_read_desired(handle_);
 
         if (w)
-            socket_.async_wait(boost::asio::socket_base::wait_write, boost::asio::bind_executor(strand_, 
+            socket_.async_wait(boost::asio::socket_base::wait_write, boost::asio::bind_executor(strand_,
                     [this] (boost::system::error_code error) {
                 if (error) return;
                 invoke_waitable(error);
             }));
 
         if (r)
-            socket_.async_wait(boost::asio::socket_base::wait_read, boost::asio::bind_executor(strand_, 
+            socket_.async_wait(boost::asio::socket_base::wait_read, boost::asio::bind_executor(strand_,
                 [this] (boost::system::error_code error) {
                 if (error) return;
                 invoke_waitable(error);
             }));
 
-        auto us = get_timeout();
+        auto us = timeout();
         timer_.expires_after(us);
         timer_.async_wait(boost::asio::bind_executor(strand_, [this] (boost::system::error_code error) {
             if (error) return;
-            
-            // SSL_handle_events(handle_);
+
+            // SSL_handle_events(ssl);
             invoke_waitable(error);
             socket_.cancel();
         }));
     }
 
-
-    std::chrono::steady_clock::duration get_timeout() {
+    std::chrono::steady_clock::duration timeout() {
         struct timeval tv;
         int isinfinite;
-        std::chrono::microseconds us { 8000 };
+        std::chrono::microseconds us { 4000 };
         if (SSL_get_event_timeout(handle_, &tv, &isinfinite) && !isinfinite
             /* && tv.tv_sec < 1 && tv.tv_usec < 8000 */)
             us = std::chrono::microseconds(tv.tv_usec + tv.tv_sec * 1000000);

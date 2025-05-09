@@ -3,33 +3,28 @@
 
 #include "detail/ssl.hpp"
 #include "detail/asio.hpp"
-#include "basic_endpoint.hpp"
-#include "impl/handler.hpp"
+#include "endpoint.hpp"
+#include "impl/ssl_extra_data.hpp"
 #include "impl/server.hpp"
 
 namespace quic {
 
-class server: public impl::handler {
-public:
-private:
-    SSL*       handler_;
+class server {
     impl::server* impl_;
 
 public:
     server(boost::asio::io_context& io, boost::asio::ssl::context& ctx) {
-        if (handler_ = SSL_new_listener(ctx.native_handle(), 0); handler_ == nullptr) {
+        impl_ = impl::ssl_extra_data::emplace<impl::server>(
+            SSL_new_listener(ctx.native_handle(), 0), io, ctx);
+        if (impl_ == nullptr)
             throw std::runtime_error("failed to create ssl listener");
-        }
-        impl_ = emplace<impl::server>(handler_, io, ctx);
     }
 
-    template <class Protocol>
-    void bind(const basic_endpoint<Protocol>& addr) {
-        impl_->bind(handler_, addr);
+    void bind(const endpoint& addr) {
+        impl_->bind(addr);
     }
-
-    ~server() {
-        SSL_free(handler_); // 引用计数释放关联实现
+    void listen() {
+        impl_->listen();
     }
 };
 

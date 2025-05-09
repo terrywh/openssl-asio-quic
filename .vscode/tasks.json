@@ -8,7 +8,7 @@
 			"args": [
 				"build",
 				"--root",
-				"--verbose"
+				"--verbose",
 			],
 			"options": {
 				"cwd": "${workspaceFolder}",

@@ -1,23 +1,19 @@
-#ifndef QUIC_DETAIL_READ_SOME_H
-#define QUIC_DETAIL_READ_SOME_H
+#ifndef QUIC_IMPL_STREAM_READ_SOME_H
+#define QUIC_IMPL_STREAM_READ_SOME_H
 
-#include "connection_base.hpp"
-#include "stream_base.hpp"
+#include "connection.hpp"
+#include "stream.hpp"
 
 namespace quic {
-namespace detail {
+namespace impl {
 
-template <class Protocol, class Executor, class MutableBufferSequence>
-struct do_read_some {
-    using connection_type = connection_base<Protocol, Executor>;
-    using stream_type = stream_base<Protocol, Executor>;
-    using mutable_buffers_type = typename std::decay<MutableBufferSequence>::type;
+template <class MutableBufferSequence>
+struct stream_read_some {
+    impl::connection* conn_;
+    impl::stream*   stream_;
+    const MutableBufferSequence& buffers_;
 
-    connection_type* conn_;
-    stream_type* stream_;
-    const mutable_buffers_type& buffers_;
-
-    do_read_some(connection_type* conn, stream_type* stream, const mutable_buffers_type& buffers)
+    stream_read_some(impl::connection* conn, impl::stream* stream, const MutableBufferSequence& buffers)
     : conn_(conn)
     , stream_(stream)
     , buffers_(buffers) {}
@@ -45,21 +41,17 @@ struct do_read_some {
     }
 };
 
-template <class Protocol, class Executor, class MutableBufferSequence>
-struct do_async_read_some {
-    using connection_type = connection_base<Protocol, Executor>;
-    using stream_type = stream_base<Protocol, Executor>;
-    using mutable_buffers_type = typename std::decay<MutableBufferSequence>::type;
-
-    connection_type* conn_;
-    stream_type* stream_;
-    const mutable_buffers_type& buffers_;
+template <class MutableBufferSequence>
+struct stream_read_some_async {
+    impl::connection* conn_;
+    impl::stream*   stream_;
+    const MutableBufferSequence& buffers_;
     int start_;
     std::size_t read_;
     enum {preparing, reading} state_;
     boost::asio::mutable_buffer buffer_;
 
-    do_async_read_some(connection_type* conn, stream_type* stream, const mutable_buffers_type& buffers)
+    stream_read_some_async(impl::connection* conn, impl::stream* stream, const MutableBufferSequence& buffers)
     : conn_(conn)
     , stream_(stream)
     , buffers_(buffers)
@@ -70,7 +62,7 @@ struct do_async_read_some {
     boost::asio::mutable_buffer next_buffer() {
         auto i = boost::asio::buffer_sequence_begin(buffers_);
         std::advance(i, start_++);
-        if (i == boost::asio::buffer_sequence_end(buffers_)) 
+        if (i == boost::asio::buffer_sequence_end(buffers_))
             return {};
         return *i;
     }
@@ -123,7 +115,7 @@ READ_NEXT:
 };
 
 
-} // namespace detail
+} // namespace impl
 } // namespace quic
 
-#endif // QUIC_DETAIL_READ_SOME_H
+#endif // QUIC_IMPL_STREAM_READ_SOME_H

@@ -1,64 +1,52 @@
 #ifndef QUIC_DETAIL_CONNECT_H
 #define QUIC_DETAIL_CONNECT_H
 
-#include "connection_base.hpp"
-#include "../basic_endpoint.hpp"
+#include "../endpoint.hpp"
+#include "../endpoint_resolve_result.hpp"
 #include "../alpn.hpp"
+#include "connection.hpp"
+#include "ssl_extra_data.hpp"
 
 namespace quic {
+namespace impl {
 
-template <class Protocol, class Executor>
-class basic_connection;
+struct connection_connect_basic {
+    impl::connection* conn_;
+    const endpoint&   addr_;
 
-namespace detail {
-
-template <class Protocol, class Executor>
-struct do_connect_base {
-    using connection_type = connection_base<Protocol, Executor>;
-    using endpoint_type = connection_type::endpoint_type;
-
-    connection_type* conn_;
-    endpoint_type addr_;
-
-    do_connect_base(connection_type* conn, const endpoint_type& addr)
+    connection_connect_basic(impl::connection* conn, const endpoint& addr)
     : conn_(conn)
     , addr_(addr) {}
 
-    do_connect_base(do_connect_base&& other) = default;
-
-    void create(bool blocking) const {
+    void create_object(bool blocking) const {
         conn_->handle_ = SSL_new(conn_->sslctx_.native_handle());
-        SSL_set_default_stream_mode(conn_->handle_, SSL_DEFAULT_STREAM_MODE_NONE);
+        ssl_extra_data::set<impl::connection>(conn_->handle_, conn_);
 
+        SSL_set_default_stream_mode(conn_->handle_, SSL_DEFAULT_STREAM_MODE_NONE);
         SSL_set_alpn_protos(conn_->handle_, conn_->alpn_, conn_->alpn_.size());
         SSL_set_tlsext_host_name(conn_->handle_, conn_->host_.c_str());
         SSL_set1_host(conn_->handle_, conn_->host_.c_str());
+        SSL_set1_initial_peer_addr(conn_->handle_, addr_);
 
         BIO* bio = BIO_new(BIO_s_datagram());
         BIO_set_fd(bio, conn_->socket_.native_handle(), BIO_NOCLOSE);
         SSL_set_bio(conn_->handle_, bio, bio);
-
-        SSL_set1_initial_peer_addr(conn_->handle_, addr_);
     }
 };
 
-template <class Protocol, class Executor>
-struct do_connect: public do_connect_base<Protocol, Executor> {
-    using connection_type = typename do_connect_base<Protocol, Executor>::connection_type;
-    using endpoint_type = typename do_connect_base<Protocol, Executor>::endpoint_type;
-
-    do_connect(connection_type* conn, const endpoint_type& addr)
-    : do_connect_base<Protocol,Executor>(conn, addr) {}
+struct connection_connect: public connection_connect_basic {
+    connection_connect(impl::connection* conn, const endpoint& addr)
+    : connection_connect_basic(conn, addr) {}
 
     void operator()() const {
-        this->conn_->socket_.close();
-        this->conn_->socket_.connect(this->addr_);
+        conn_->socket_.close();
+        conn_->socket_.connect(addr_);
 
-        SSL_free(this->conn_->handle_);
-        this->create(true);
+        SSL_free(conn_->handle_);
+        create_object(true);
 
-        if (int r = SSL_connect(this->conn_->handle_); r <= 0) {
-            int err = SSL_get_error(this->conn_->handle_, r);
+        if (int r = SSL_connect(conn_->handle_); r <= 0) {
+            int err = SSL_get_error(conn_->handle_, r);
             switch (err) {
             case SSL_ERROR_SYSCALL:
                 throw boost::system::system_error{errno, boost::asio::error::get_system_category()};
@@ -66,20 +54,16 @@ struct do_connect: public do_connect_base<Protocol, Executor> {
             default:
                 throw boost::system::system_error{err, boost::asio::error::get_ssl_category()};
             }
-            
+
         }
     }
 };
 
-template <class Protocol, class Executor>
-struct do_async_connect: public do_connect_base<Protocol, Executor> {
-    using connection_type = typename do_connect_base<Protocol, Executor>::connection_type;
-    using endpoint_type = typename do_connect_base<Protocol, Executor>::endpoint_type;
-
+struct connection_connect_async: public connection_connect_basic {
     mutable enum {connecting, binding, handshaking} state_;
-    
-    do_async_connect(connection_type* conn, const endpoint_type& addr)
-    : do_connect_base<Protocol,Executor>(conn, addr)
+
+    connection_connect_async(impl::connection* conn, const endpoint& addr)
+    : connection_connect_basic(conn, addr)
     , state_(connecting) { }
 
     template <class Self>
@@ -90,27 +74,27 @@ struct do_async_connect: public do_connect_base<Protocol, Executor> {
         }
 
         switch (state_) {
-        case connecting: 
+        case connecting:
             state_ = binding;
-            this->conn_->socket_.close();
-            this->conn_->socket_.async_connect(this->addr_, std::move(self));
+            conn_->socket_.close();
+            conn_->socket_.async_connect(addr_, std::move(self));
             break;
         case binding:
             state_ = handshaking;
-            this->conn_->socket_.native_non_blocking(true);
+            conn_->socket_.native_non_blocking(true);
 
-            SSL_free(this->conn_->handle_);
-            this->create(false);
-            SSL_set_blocking_mode(this->conn_->handle_, 0);
+            SSL_free(conn_->handle_);
+            create_object(false);
+            SSL_set_blocking_mode(conn_->handle_, 0);
 
             [[fallthrough]];
         case handshaking:
-            if (int r = SSL_connect(this->conn_->handle_); r != 1) {
-                int err = SSL_get_error(this->conn_->handle_, r);
+            if (int r = SSL_connect(conn_->handle_); r != 1) {
+                int err = SSL_get_error(conn_->handle_, r);
                 switch (err) {
                 case SSL_ERROR_WANT_READ:
                 case SSL_ERROR_WANT_WRITE:
-                    this->conn_->async_wait(std::move(self));
+                    conn_->async_wait(std::move(self));
                     break;
                 case SSL_ERROR_SYSCALL:
                     self.complete(boost::system::error_code{errno, boost::asio::error::get_system_category()});
@@ -125,24 +109,21 @@ struct do_async_connect: public do_connect_base<Protocol, Executor> {
     }
 };
 
-template <class Protocol, class Executor, class EndpointSequence>
-struct do_async_connect_seq {
-    using connection_type = connection_base<Protocol, Executor>;
-    using endpoint_seq = typename std::decay<EndpointSequence>::type;
-    using iterator_type = typename EndpointSequence::iterator;
+struct connection_connect_async_seq {
+    using iterator_type = endpoint_resolve_result::iterator;
     using difference_type = iterator_type::difference_type;
-   
-    connection_type* conn_;
-    endpoint_seq addr_;
+
+    impl::connection*        conn_;
+    endpoint_resolve_result  addr_;
     mutable difference_type start_;
 
-    do_async_connect_seq(connection_type* conn, const EndpointSequence& addr)
+    connection_connect_async_seq(impl::connection* conn, const endpoint_resolve_result& addr)
     : conn_(conn)
     , addr_(addr)
     , start_(0) {}
 
-    do_async_connect_seq(const do_async_connect_seq& seq) = delete;
-    do_async_connect_seq(do_async_connect_seq&& seq) = default;
+    connection_connect_async_seq(const connection_connect_async_seq& seq) = delete;
+    connection_connect_async_seq(connection_connect_async_seq&& seq) = default;
 
     template <class Self>
     void operator()(Self& self, boost::system::error_code error = {}) const {
@@ -166,29 +147,23 @@ struct do_async_connect_seq {
         }
 
         boost::asio::async_compose<Self, void (boost::system::error_code)>(
-            detail::do_async_connect<Protocol, Executor>{conn_, *i}, self);
+            impl::connection_connect_async{conn_, *i}, self);
     }
 };
 
-template <class Protocol, class Executor, class EndpointSequence>
-struct do_connect_seq {
-    using connection_type = connection_base<Protocol, Executor>;
-    using endpoint_seq = typename std::decay<EndpointSequence>::type;
-    using endpoint_type = typename EndpointSequence::value_type;
+struct connection_connect_seq {
+    impl::connection*       conn_;
+    endpoint_resolve_result addr_; // TODO 是否可以直接使用临时对象？（延长的生命周期）
 
-
-    connection_type* conn_;
-    EndpointSequence addr_;
-
-    do_connect_seq(connection_type* conn, const EndpointSequence& eps)
+    connection_connect_seq(impl::connection* conn, const endpoint_resolve_result& eps)
     : conn_(conn)
     , addr_(eps) {}
 
-    endpoint_type operator()() {
+    endpoint_resolve_result::value_type operator()() {
         auto i = addr_.begin();
         for (;;) {
             try {
-                do_connect<Protocol, Executor>{conn_, *i}();
+                connection_connect{conn_, *i}();
             } catch(const std::exception& ex) {
                 if (++i == addr_.end()) throw;
                 continue;

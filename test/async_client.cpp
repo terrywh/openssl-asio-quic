@@ -7,12 +7,6 @@
 #include <iostream>
 #include <format>
 
-static std::string payload {
-    "GET /hello HTTP/1.0\r\n"
-    "Host: localhost\r\n"
-    "\r\n"
-};
-
 boost::asio::awaitable<void> run(boost::asio::io_context& io) {
     boost::asio::ssl::context sslctx {SSL_CTX_new(OSSL_QUIC_client_method())};
     sslctx.set_verify_mode(boost::asio::ssl::context_base::verify_none);
@@ -25,7 +19,7 @@ boost::asio::awaitable<void> run(boost::asio::io_context& io) {
     co_await quic::async_connect(conn, quic::resolve("localhost", "8443"),
         boost::asio::use_awaitable);
     std::cout << std::format("{:-^64}\n", "connection established");
-    
+
     std::string payload {
         "POST /hello HTTP/1.0\r\n"
         "Host: localhost\r\n"
