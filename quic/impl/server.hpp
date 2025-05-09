@@ -3,35 +3,32 @@
 
 #include "../detail/asio.hpp"
 #include "../detail/ssl.hpp"
+#include "../proto.hpp"
 #include "../basic_endpoint.hpp"
 #include <iostream>
 
 namespace quic {
 namespace impl {
 
-template <class Protocol, class Executor = boost::asio::any_io_executor>
-class basic_server {
-public:
-    using protocol_type = typename std::decay<Protocol>::type;
-    using executor_type = typename std::decay<Executor>::type;
+class server {
 
 private:
-    boost::asio::strand<Executor>                          strand_;
-    boost::asio::ssl::context&                                ctx_;
-    boost::asio::basic_datagram_socket<Protocol, Executor> socket_;
+    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
+    boost::asio::ssl::context&                                     ctx_;
+    boost::asio::basic_datagram_socket<quic::proto>             socket_;
 
 public:
-    template <class ExecutionContext>
-    basic_server(ExecutionContext& ex, boost::asio::ssl::context& ctx)
-    : strand_(ex.get_executor())
+    server(boost::asio::io_context& io, boost::asio::ssl::context& ctx)
+    : strand_(io.get_executor())
     , ctx_(ctx)
     , socket_(strand_)  {
         std::cout << "+basic_server\n";
     }
-    ~basic_server() {
+    ~server() {
         std::cout << "-basic_server\n";
     }
 
+    template <class Protocol>
     void bind(SSL* handler, const basic_endpoint<Protocol>& addr) {
         socket_.open(addr.protocol());
         socket_.bind(addr);
