@@ -21,19 +21,19 @@ target("quic")
         "quic/**.hpp",
         "quic/**.ipp")
 
-target("quic-block-client")
+target("block_client")
     set_kind("binary")
     add_deps("quic")
     add_rules("mode.debug", "mode.release")
     add_files("test/block_client.cpp")
 
-target("quic-async-client")
+target("async_client")
     set_kind("binary")
     add_deps("quic")
     add_rules("mode.debug", "mode.release")
     add_files("test/async_client.cpp")
 
-target("quic-block-server")
+target("block_server")
     set_kind("binary")
     add_deps("quic")
     add_rules("mode.debug", "mode.release")

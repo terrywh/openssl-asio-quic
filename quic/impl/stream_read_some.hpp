@@ -24,13 +24,7 @@ struct stream_read_some {
             boost::asio::mutable_buffer buffer = *i;
             std::size_t size;
             if (int r = SSL_read_ex(stream_->handle_, buffer.data(), buffer.size(), &size); r <= 0) {
-                int err = SSL_get_error(conn_->handle_, r);
-                switch (err) {
-                case SSL_ERROR_SYSCALL:
-                    throw boost::system::system_error{errno, boost::asio::error::get_system_category()};
-                default:
-                    throw boost::system::system_error{err, boost::asio::error::get_ssl_category()};
-                }
+                detail::error_handler(SSL_get_error(conn_->handle_, r)).throws();
             }
             read += size;
             if (size != buffer.size()) {
@@ -85,21 +79,8 @@ READ_NEXT:
                 return;
             }
             if (int r = SSL_read_ex(stream_->handle_, buffer_.data(), buffer_.size(), &size); r <= 0) {
-                int err = SSL_get_error(stream_->handle_, r);
-                switch(err) {
-                case SSL_ERROR_WANT_READ:
-                case SSL_ERROR_WANT_WRITE:
+                if (detail::error_handler(SSL_get_error(stream_->handle_, r)).returns(self))
                     conn_->async_wait(std::move(self));
-                    break;
-                case SSL_ERROR_SYSCALL:
-                    self.complete(boost::system::error_code{errno, boost::asio::error::get_system_category()}, read_);
-                    break;
-                case SSL_ERROR_ZERO_RETURN:
-                    self.complete(boost::system::error_code{SSL_R_STREAM_FINISHED, boost::asio::error::get_ssl_category()}, read_);
-                    break;
-                default:
-                    self.complete(boost::system::error_code{err, boost::asio::error::get_ssl_category()}, read_);
-                }
                 return;
             } else if (size != buffer_.size()) {
                 read_ += size;

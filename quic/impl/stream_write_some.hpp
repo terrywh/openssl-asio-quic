@@ -25,13 +25,7 @@ struct stream_write_some {
         for (auto i=boost::asio::buffer_sequence_begin(buffers_); i!=boost::asio::buffer_sequence_end(buffers_); ++i) {
             boost::asio::const_buffer buffer = *i;
             if (int r = SSL_write_ex(stream_->handle_, buffer.data(), buffer.size(), &write); r <= 0) {
-                int err = SSL_get_error(conn_->handle_, r);
-                switch (err) {
-                case SSL_ERROR_SYSCALL:
-                    throw boost::system::system_error{errno, boost::asio::error::get_system_category()};
-                default:
-                    throw boost::system::system_error{err, boost::asio::error::get_ssl_category()};
-                }
+                error_handler(SSL_get_error(conn_->handle_, r)).throws();
             } else {
                 total += write; // 默认情况 SSL_MODE_ENABLE_PARTIAL_WRITE 未启用，未发生错误时一定完成了写入
             }
@@ -87,18 +81,8 @@ WRITE_NEXT:
                 return;
             }
             if (int r = SSL_write_ex(stream_->handle_, buffer_.data(), buffer_.size(), &size); r <= 0) {
-                int err = SSL_get_error(this->conn_->handle_, r);
-                switch (err) {
-                case SSL_ERROR_WANT_READ:
-                case SSL_ERROR_WANT_WRITE:
+                if (detail::error_handler(SSL_get_error(this->conn_->handle_, r)).returns(self))
                     conn_->async_wait(std::move(self));
-                    break;
-                case SSL_ERROR_SYSCALL:
-                    self.complete(boost::system::error_code{errno, boost::asio::error::get_system_category()}, wrote_);
-                    break;
-                default:
-                    self.complete(boost::system::error_code{err, boost::asio::error::get_ssl_category()}, wrote_);
-                }
             } else {
                 state_ = preparing; // 下一个待写入的区块
                 wrote_ += size;

@@ -3,17 +3,17 @@
 
 #include "detail/asio.hpp"
 #include "detail/ssl.hpp"
+#include "detail/ssl_extra_data.hpp"
 
 #include "alpn.hpp"
 #include "endpoint.hpp"
 #include "endpoint_resolve_result.hpp"
-#include "impl/stream.hpp"
 #include "stream.hpp"
 
-#include "impl/ssl_extra_data.hpp"
 #include "impl/connection.hpp"
 #include "impl/connection_connect.hpp"
 #include "impl/connection_create_stream.hpp"
+#include "impl/stream.hpp"
 
 namespace quic {
 namespace impl {
@@ -35,7 +35,7 @@ public:
     using executor_type = impl::connection::executor_type;
 
     connection(boost::asio::io_context& io, boost::asio::ssl::context& ctx) {
-        impl::ssl_extra_data::emplace<impl::connection>(nullptr, io, ctx);
+        impl_ = detail::ssl_extra_data::emplace<impl::connection>(nullptr, io, ctx);
     }
 
     executor_type& get_executor() const {
@@ -65,13 +65,13 @@ public:
             impl::connection_connect_async{impl_, addr}, token);
     }
     void create_stream(stream& s) {
-        s.impl_ = impl::ssl_extra_data::emplace<impl::stream>(nullptr, impl_);
+        s.impl_ = detail::ssl_extra_data::emplace<impl::stream>(nullptr, impl_);
         impl::connection_create_stream{impl_, s.impl_}();
     }
     // 参考 async_connect 实现 async_create_stream
     template <class CompletionToken>
     auto async_create_stream(stream& s, CompletionToken&& token) {
-        s.impl_ = impl::ssl_extra_data::emplace<impl::stream>(nullptr, impl_);
+        s.impl_ = detail::ssl_extra_data::emplace<impl::stream>(nullptr, impl_);
         return boost::asio::async_compose<CompletionToken, void(boost::system::error_code)>(
             impl::connection_create_stream_async{impl_, s.impl_}, token);
     }

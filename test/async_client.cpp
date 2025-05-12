@@ -18,7 +18,7 @@ boost::asio::awaitable<void> run(boost::asio::io_context& io) {
 
     co_await quic::async_connect(conn, quic::resolve("localhost", "8443"),
         boost::asio::use_awaitable);
-    std::cout << std::format("{:-^64}\n", "connection established");
+    std::cout << std::format("{:-^64}\n", " connection established ");
 
     std::string payload {
         "POST /hello HTTP/1.0\r\n"
@@ -30,17 +30,17 @@ boost::asio::awaitable<void> run(boost::asio::io_context& io) {
 
     quic::stream stream;
     co_await conn.async_create_stream(stream, boost::asio::use_awaitable);
-    std::cout << std::format("{:-^64}\n", "stream created");
+    std::cout << std::format("{:-^64}\n", " stream created ");
 
     std::size_t size = co_await stream.async_write_some(boost::asio::buffer(payload), boost::asio::use_awaitable);
-    std::cout << std::format("{:-^64}\n", "request wrote");
+    std::cout << std::format("{:-^64}\n", " request wrote ");
     stream.shutdown(boost::asio::socket_base::shutdown_send);
 
     payload.resize(1024);
     size = co_await stream.async_read_some(boost::asio::buffer(payload), boost::asio::use_awaitable);
     payload.resize(size);
 
-    std::cout << std::format("{:-^64}\n", "response read");
+    std::cout << std::format("{:-^64}\n", " response read ");
     std::cout << payload << "\n";
 
 DONE:

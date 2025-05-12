@@ -6,6 +6,7 @@
 #include "../alpn.hpp"
 #include "../proto.hpp"
 
+#include <iostream>
 #include <vector>
 
 namespace quic {
@@ -32,10 +33,15 @@ struct connection {
     , sslctx_(ctx)
     , socket_(strand_)
     , timer_(strand_) {
+        std::cout << "+connection\n";
         callable_.reserve(4);
         waitable_.reserve(4);
         set_alpn(application_protocol_list{"default/1"});
         set_host("localhost");
+    }
+
+    ~connection() {
+        std::cout << "~connection\n";
     }
 
     void invoke_waitable(const boost::system::error_code& error) {

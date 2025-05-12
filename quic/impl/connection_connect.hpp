@@ -1,11 +1,14 @@
 #ifndef QUIC_DETAIL_CONNECT_H
 #define QUIC_DETAIL_CONNECT_H
 
+#include "../detail/error_handler.hpp"
+#include "../detail/ssl_extra_data.hpp"
+
+#include "connection.hpp"
+
 #include "../endpoint.hpp"
 #include "../endpoint_resolve_result.hpp"
 #include "../alpn.hpp"
-#include "connection.hpp"
-#include "ssl_extra_data.hpp"
 
 namespace quic {
 namespace impl {
@@ -20,7 +23,7 @@ struct connection_connect_basic {
 
     void create_object(bool blocking) const {
         conn_->handle_ = SSL_new(conn_->sslctx_.native_handle());
-        ssl_extra_data::set<impl::connection>(conn_->handle_, conn_);
+        detail::ssl_extra_data::set<impl::connection>(conn_->handle_, conn_);
 
         SSL_set_default_stream_mode(conn_->handle_, SSL_DEFAULT_STREAM_MODE_NONE);
         SSL_set_alpn_protos(conn_->handle_, conn_->alpn_, conn_->alpn_.size());
@@ -46,15 +49,8 @@ struct connection_connect: public connection_connect_basic {
         create_object(true);
 
         if (int r = SSL_connect(conn_->handle_); r <= 0) {
-            int err = SSL_get_error(conn_->handle_, r);
-            switch (err) {
-            case SSL_ERROR_SYSCALL:
-                throw boost::system::system_error{errno, boost::asio::error::get_system_category()};
-                break;
-            default:
-                throw boost::system::system_error{err, boost::asio::error::get_ssl_category()};
-            }
-
+            detail::error_handler(SSL_get_error(conn_->handle_, r)).throws();
+            std::cout << "abc\n";
         }
     }
 };
@@ -90,18 +86,8 @@ struct connection_connect_async: public connection_connect_basic {
             [[fallthrough]];
         case handshaking:
             if (int r = SSL_connect(conn_->handle_); r != 1) {
-                int err = SSL_get_error(conn_->handle_, r);
-                switch (err) {
-                case SSL_ERROR_WANT_READ:
-                case SSL_ERROR_WANT_WRITE:
+                if (detail::error_handler(SSL_get_error(conn_->handle_, r)).returns(self)) 
                     conn_->async_wait(std::move(self));
-                    break;
-                case SSL_ERROR_SYSCALL:
-                    self.complete(boost::system::error_code{errno, boost::asio::error::get_system_category()});
-                    break;
-                default:
-                    self.complete(boost::system::error_code{err, boost::asio::error::get_ssl_category()});
-                }
             } else {
                 self.complete(boost::system::error_code{});
             }

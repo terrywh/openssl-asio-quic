@@ -1,13 +1,13 @@
 #ifndef QUIC_DETAIL_ATTACHED_H
 #define QUIC_DETAIL_ATTACHED_H
 #include "../detail/ssl.hpp"
-#include "connection.hpp"
-#include "stream.hpp"
-#include "server.hpp"
+#include "../impl/connection.hpp"
+#include "../impl/stream.hpp"
+#include "../impl/server.hpp"
 #include <variant>
 
 namespace quic {
-namespace impl {
+namespace detail {
 
     struct ssl_extra_data {
         using variant_object = std::variant<impl::server, impl::connection, impl::stream>;
@@ -39,7 +39,7 @@ namespace impl {
         }
     };
 
-} // namespace impl
+} // namespace detail
 } // namespace quic
 
 #endif // QUIC_DETAIL_ATTACHED_H
