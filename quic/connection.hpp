@@ -13,6 +13,7 @@
 #include "impl/connection.hpp"
 #include "impl/connection_connect.hpp"
 #include "impl/connection_create_stream.hpp"
+#include "impl/connection_accept_stream.hpp"
 #include "impl/stream.hpp"
 
 namespace quic {
@@ -29,13 +30,27 @@ class connection {
     friend class impl::server;
     impl::connection* impl_ = nullptr;
 
-    connection() = default; // 服务端构建链接
-
 public:
     using executor_type = impl::connection::executor_type;
 
-    connection(boost::asio::io_context& io, boost::asio::ssl::context& ctx) {
-        impl_ = detail::ssl_extra_data::emplace<impl::connection>(nullptr, io, ctx);
+    connection() = default;
+    connection(boost::asio::io_context& io, boost::asio::ssl::context& ctx, SSL* handle = nullptr)
+    : connection(io.get_executor(), ctx, handle) {}
+    template <class Executor>
+    connection(const Executor& ex, boost::asio::ssl::context& ctx, SSL* handle = nullptr) {
+        impl_ = detail::ssl_extra_data::emplace<impl::connection>(handle, ex, ctx);
+    }
+    connection(const connection& conn) = delete;
+    connection(connection&& conn) noexcept
+    : impl_(std::exchange(conn.impl_, nullptr)) {}
+    ~connection() {
+        if (impl_ != nullptr) SSL_free(impl_->handle_);
+    }
+
+    connection& operator=(const connection& conn) = delete;
+    connection& operator=(connection&& conn) noexcept {
+        std::swap(impl_, conn.impl_);
+        return *this;
     }
 
     executor_type& get_executor() const {
@@ -64,6 +79,7 @@ public:
         return boost::asio::async_compose<CompletionToken, void (boost::system::error_code)>(
             impl::connection_connect_async{impl_, addr}, token);
     }
+
     void create_stream(stream& s) {
         if (s.impl_ == nullptr)
             s = stream{impl_};
@@ -77,6 +93,14 @@ public:
         return boost::asio::async_compose<CompletionToken, void(boost::system::error_code)>(
             impl::connection_create_stream_async{impl_, s.impl_}, token);
     }
+    void accept_stream(stream& s) {
+        if (s.impl_ == nullptr)
+            s = stream{impl_};
+        impl::connection_accept_stream{impl_, s.impl_}();
+    }
+
+    // TODO shutdown()
+    // TODO async_shutdown()
 };
 
 } // namespace quic

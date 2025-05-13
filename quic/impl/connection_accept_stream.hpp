@@ -1,5 +1,5 @@
-#ifndef QUIC_IMPL_CONNECTION_CREATE_STREAM_H
-#define QUIC_IMPL_CONNECTION_CREATE_STREAM_H
+#ifndef QUIC_IMPL_CONNECTION_ACCEPT_STREAM_H
+#define QUIC_IMPL_CONNECTION_ACCEPT_STREAM_H
 
 #include "../detail/error_handler.hpp"
 #include "../detail/ssl_extra_data.hpp"
@@ -9,27 +9,26 @@
 namespace quic {
 namespace impl {
 
-struct connection_create_stream {
+struct connection_accept_stream {
     impl::connection* conn_;
     impl::stream*   stream_;
 
-    connection_create_stream(impl::connection* conn, impl::stream* stream)
+    connection_accept_stream(impl::connection* conn, impl::stream* stream)
     : conn_(conn)
     , stream_(stream) { }
 
     void operator()() const {
-        if (stream_->handle_ = SSL_new_stream(conn_->handle_, 0); stream_->handle_ == nullptr) {
+        if (stream_->handle_ = SSL_accept_stream(conn_->handle_, 0); stream_->handle_ == nullptr)
             detail::error_handler(SSL_get_error(conn_->handle_, 0)).throws();
-        }
         detail::ssl_extra_data::set<impl::stream>(stream_->handle_, stream_);
     }
 };
 
-struct connection_create_stream_async {
+struct connection_accept_stream_async {
     impl::connection* conn_;
     impl::stream*   stream_;
 
-    connection_create_stream_async(impl::connection* conn, impl::stream* stream)
+    connection_accept_stream_async(impl::connection* conn, impl::stream* stream)
     : conn_(conn)
     , stream_(stream) { }
 
@@ -53,4 +52,4 @@ struct connection_create_stream_async {
 } // namespace impl
 } // namespace quic
 
-#endif // QUIC_IMPL_CONNECTION_CREATE_STREAM_H
+#endif // QUIC_IMPL_CONNECTION_ACCEPT_STREAM_H

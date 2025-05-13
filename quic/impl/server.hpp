@@ -3,8 +3,11 @@
 
 #include "../detail/asio.hpp"
 #include "../detail/ssl.hpp"
+#include "../detail/error_handler.hpp"
+
 #include "../proto.hpp"
 #include "../endpoint.hpp"
+
 #include <iostream>
 
 namespace quic {
@@ -16,9 +19,10 @@ struct server {
     boost::asio::ssl::context&                                  sslctx_;
     boost::asio::basic_datagram_socket<quic::proto>             socket_;
 
-    server(SSL* handle, boost::asio::io_context& io, boost::asio::ssl::context& ctx)
+    template <class Executor>
+    server(SSL* handle, const Executor& ex, boost::asio::ssl::context& ctx)
     : handle_(handle)
-    , strand_(io.get_executor())
+    , strand_(ex)
     , sslctx_(ctx)
     , socket_(strand_)  {
         std::cout << "+basic_server\n";
@@ -34,9 +38,8 @@ struct server {
     }
 
     void listen() {
-        if (int r = SSL_listen(handle_); r != SSL_ERROR_NONE) {
-            throw boost::system::system_error(SSL_get_error(handle_, r), boost::asio::error::get_ssl_category());
-        }
+        if (!SSL_listen(handle_))
+            detail::error_handler(SSL_get_error(handle_, 0)).throws();
     }
 
     // template <class Executor1>

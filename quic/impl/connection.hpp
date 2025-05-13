@@ -27,9 +27,10 @@ struct connection {
     application_protocol_list alpn_;
     std::string               host_;
 
-    connection(SSL* handle, boost::asio::io_context& io, boost::asio::ssl::context& ctx)
+    template <class Executor>
+    connection(SSL* handle, const Executor& ex, boost::asio::ssl::context& ctx)
     : handle_(handle)
-    , strand_(io.get_executor())
+    , strand_(ex)
     , sslctx_(ctx)
     , socket_(strand_)
     , timer_(strand_) {

@@ -5,7 +5,7 @@
 void run(boost::asio::io_context& io) {
     boost::asio::ssl::context sslctx {SSL_CTX_new(OSSL_QUIC_client_method())};
     sslctx.set_verify_mode(boost::asio::ssl::context_base::verify_none);
-    sslctx.set_default_verify_paths();
+    // sslctx.set_default_verify_paths();
 
     quic::connection conn {io, sslctx};
     conn.set_host("localhost");
@@ -29,12 +29,14 @@ void run(boost::asio::io_context& io) {
 
     std::size_t size = stream.write_some(boost::asio::buffer(payload));
     std::cout << std::format("{:-^64}\n", " request wrote ");
+    std::cout << "size = " << size << "\n";
     stream.shutdown(boost::asio::socket_base::shutdown_send);
 
     payload.resize(1024);
     size = stream.read_some(boost::asio::buffer(payload));
     payload.resize(size);
     std::cout << std::format("{:-^64}\n", " response read ");
+    std::cout << "size = " << size << "\n";
     std::cout << payload << "\n";
 
 DONE:

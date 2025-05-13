@@ -3,6 +3,7 @@
 
 #include "proto.hpp"
 #include "endpoint.hpp"
+#include "endpoint_resolve_result.hpp"
 
 namespace quic {
 
