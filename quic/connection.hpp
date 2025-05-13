@@ -65,13 +65,15 @@ public:
             impl::connection_connect_async{impl_, addr}, token);
     }
     void create_stream(stream& s) {
-        s.impl_ = detail::ssl_extra_data::emplace<impl::stream>(nullptr, impl_);
+        if (s.impl_ == nullptr)
+            s = stream{impl_};
         impl::connection_create_stream{impl_, s.impl_}();
     }
     // 参考 async_connect 实现 async_create_stream
     template <class CompletionToken>
     auto async_create_stream(stream& s, CompletionToken&& token) {
-        s.impl_ = detail::ssl_extra_data::emplace<impl::stream>(nullptr, impl_);
+        if (s.impl_ == nullptr)
+            s = stream{impl_};
         return boost::asio::async_compose<CompletionToken, void(boost::system::error_code)>(
             impl::connection_create_stream_async{impl_, s.impl_}, token);
     }

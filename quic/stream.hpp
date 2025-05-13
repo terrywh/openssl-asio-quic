@@ -23,8 +23,9 @@ public:
 
     stream() = default;
     stream(impl::connection* conn)
-    : conn_(conn) {
-        if (conn_ && conn_->handle_) SSL_up_ref(conn_->handle_);
+    : conn_(conn)
+    , impl_(detail::ssl_extra_data::emplace<impl::stream>(nullptr, conn_)) {
+        SSL_up_ref(conn_->handle_);
     }
     stream(const stream&& s) = delete;
     stream(stream&& s) noexcept

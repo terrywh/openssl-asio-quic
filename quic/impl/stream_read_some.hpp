@@ -1,6 +1,7 @@
 #ifndef QUIC_IMPL_STREAM_READ_SOME_H
 #define QUIC_IMPL_STREAM_READ_SOME_H
 
+#include "../detail/error_handler.hpp"
 #include "connection.hpp"
 #include "stream.hpp"
 
@@ -79,7 +80,7 @@ READ_NEXT:
                 return;
             }
             if (int r = SSL_read_ex(stream_->handle_, buffer_.data(), buffer_.size(), &size); r <= 0) {
-                if (detail::error_handler(SSL_get_error(stream_->handle_, r)).returns(self))
+                if (detail::error_handler(SSL_get_error(stream_->handle_, r)).wait_ex(self, read_))
                     conn_->async_wait(std::move(self));
                 return;
             } else if (size != buffer_.size()) {

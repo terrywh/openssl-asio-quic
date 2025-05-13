@@ -17,7 +17,7 @@ struct connection_create_stream {
 
     void operator()() const {
         if (stream_->handle_ = SSL_new_stream(conn_->handle_, SSL_STREAM_FLAG_NO_BLOCK); stream_->handle_ == nullptr) {
-            detail::error_handler(SSL_get_error(this->conn_->handle_, 0)).throws();
+            detail::error_handler(SSL_get_error(conn_->handle_, 0)).throws();
         }
     }
 };
@@ -37,8 +37,8 @@ struct connection_create_stream_async {
             return;
         }
         if (stream_->handle_ = SSL_new_stream(conn_->handle_, SSL_STREAM_FLAG_NO_BLOCK); stream_->handle_ == nullptr) {
-            if (detail::error_handler(SSL_get_error(this->conn_->handle_, 0)).returns(self))
-                this->conn_->async_wait(std::move(self));
+            if (detail::error_handler(SSL_get_error(conn_->handle_, 0)).wait(self))
+                conn_->async_wait(std::move(self));
             return;
         }
         self.complete(error);

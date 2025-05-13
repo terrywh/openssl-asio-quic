@@ -1,6 +1,7 @@
 #ifndef QUIC_IMPL_STREAM_WRITE_SOME_H
 #define QUIC_IMPL_STREAM_WRITE_SOME_H
 
+#include "../detail/error_handler.hpp"
 #include "connection.hpp"
 #include "stream.hpp"
 
@@ -25,7 +26,7 @@ struct stream_write_some {
         for (auto i=boost::asio::buffer_sequence_begin(buffers_); i!=boost::asio::buffer_sequence_end(buffers_); ++i) {
             boost::asio::const_buffer buffer = *i;
             if (int r = SSL_write_ex(stream_->handle_, buffer.data(), buffer.size(), &write); r <= 0) {
-                error_handler(SSL_get_error(conn_->handle_, r)).throws();
+                detail::error_handler(SSL_get_error(conn_->handle_, r)).throws();
             } else {
                 total += write; // 默认情况 SSL_MODE_ENABLE_PARTIAL_WRITE 未启用，未发生错误时一定完成了写入
             }
@@ -81,7 +82,7 @@ WRITE_NEXT:
                 return;
             }
             if (int r = SSL_write_ex(stream_->handle_, buffer_.data(), buffer_.size(), &size); r <= 0) {
-                if (detail::error_handler(SSL_get_error(this->conn_->handle_, r)).returns(self))
+                if (detail::error_handler(SSL_get_error(conn_->handle_, r)).wait_ex(self, wrote_))
                     conn_->async_wait(std::move(self));
             } else {
                 state_ = preparing; // 下一个待写入的区块

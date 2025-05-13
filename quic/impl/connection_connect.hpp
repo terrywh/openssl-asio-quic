@@ -22,6 +22,8 @@ struct connection_connect_basic {
     , addr_(addr) {}
 
     void create_object(bool blocking) const {
+        detail::ssl_extra_data::set<impl::connection>(conn_->handle_, nullptr);
+        SSL_free(conn_->handle_);
         conn_->handle_ = SSL_new(conn_->sslctx_.native_handle());
         detail::ssl_extra_data::set<impl::connection>(conn_->handle_, conn_);
 
@@ -44,13 +46,12 @@ struct connection_connect: public connection_connect_basic {
     void operator()() const {
         conn_->socket_.close();
         conn_->socket_.connect(addr_);
+        BOOST_ASSERT(conn_->socket_.is_open());
 
-        SSL_free(conn_->handle_);
         create_object(true);
 
         if (int r = SSL_connect(conn_->handle_); r <= 0) {
             detail::error_handler(SSL_get_error(conn_->handle_, r)).throws();
-            std::cout << "abc\n";
         }
     }
 };
@@ -79,14 +80,13 @@ struct connection_connect_async: public connection_connect_basic {
             state_ = handshaking;
             conn_->socket_.native_non_blocking(true);
 
-            SSL_free(conn_->handle_);
             create_object(false);
             SSL_set_blocking_mode(conn_->handle_, 0);
 
             [[fallthrough]];
         case handshaking:
             if (int r = SSL_connect(conn_->handle_); r != 1) {
-                if (detail::error_handler(SSL_get_error(conn_->handle_, r)).returns(self)) 
+                if (detail::error_handler(SSL_get_error(conn_->handle_, r)).wait(self)) 
                     conn_->async_wait(std::move(self));
             } else {
                 self.complete(boost::system::error_code{});
