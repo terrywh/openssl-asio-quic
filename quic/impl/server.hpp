@@ -7,55 +7,42 @@
 
 #include "../proto.hpp"
 #include "../endpoint.hpp"
+#include "../alpn.hpp"
 
 #include <iostream>
 
 namespace quic {
 namespace impl {
 
-struct server {
-    SSL*                                                        handle_;
-    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
-    boost::asio::ssl::context&                                  sslctx_;
-    boost::asio::basic_datagram_socket<quic::proto>             socket_;
+struct server: public waitable {
+    boost::asio::ssl::context& sslctx_;
+    application_protocol_list alpn_;
 
     template <class Executor>
     server(SSL* handle, const Executor& ex, boost::asio::ssl::context& ctx)
-    : handle_(handle)
-    , strand_(ex)
-    , sslctx_(ctx)
-    , socket_(strand_)  {
+    : waitable(ex, handle)
+    , sslctx_(ctx) {
         std::cout << "+basic_server\n";
+        alpn(application_protocol_list{"default/1"});
     }
     ~server() {
         std::cout << "-basic_server\n";
     }
 
-    void bind(endpoint addr) {
+    void bind(const endpoint& addr) {
         socket_.open(addr.protocol());
         socket_.bind(addr);
+        BOOST_ASSERT(socket_.is_open());
         SSL_set_fd(handle_, socket_.native_handle());
     }
-
     void listen() {
         if (!SSL_listen(handle_))
             detail::error_handler(SSL_get_error(handle_, 0)).throws();
     }
 
-    // template <class Executor1>
-    // void accept(basic_connection<Protocol, Executor1>& conn) {
-    //     ERR_clear_error();
-    //     if (conn.conn_ = SSL_accept_connection(listener_, 0); conn.conn_ == nullptr) {
-    //         throw std::runtime_error("failed to accept connection");
-    //     }
-    //     SSL_set_default_stream_mode(conn.conn_, SSL_DEFAULT_STREAM_MODE_NONE);
-    // }
-
-    // static int select(SSL* ssl, const unsigned char* out, unsigned char* outlen, const unsigned char* in, unsigned int inlen, void* arg) {
-    //     basic_server* self = static_cast<basic_server*>(arg);
-
-    //     return 0;
-    // }
+    void alpn(const application_protocol_list& alpn) {
+        alpn_ = alpn;
+    }
 };
 
 } // namespace impl

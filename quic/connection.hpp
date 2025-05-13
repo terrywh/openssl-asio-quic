@@ -27,13 +27,12 @@ class connection {
     friend auto async_connect(connection& conn, const endpoint_resolve_result& eps, CompletionToken&& token);
     friend auto connect(connection& conn, const endpoint_resolve_result& addr);
     // 服务端
-    friend class impl::server;
+    friend class server;
     impl::connection* impl_ = nullptr;
 
 public:
     using executor_type = impl::connection::executor_type;
-
-    connection() = default;
+    // connection() = default;
     connection(boost::asio::io_context& io, boost::asio::ssl::context& ctx, SSL* handle = nullptr)
     : connection(io.get_executor(), ctx, handle) {}
     template <class Executor>
@@ -59,14 +58,14 @@ public:
     /**
      * 设置用于应用层的交互协议列表
      */
-    void set_alpn(const application_protocol_list& alpn) {
-        impl_->set_alpn(alpn);
+    void alpn(const application_protocol_list& alpn) {
+        impl_->alpn(alpn);
     }
     /**
      * 目标域名
      */
-    void set_host(const std::string& host) {
-        impl_->set_host(host);
+    void host(const std::string& host) {
+        impl_->host(host);
     }
     /**
      * 链接指定目标

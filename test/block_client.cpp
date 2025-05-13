@@ -8,8 +8,8 @@ void run(boost::asio::io_context& io) {
     // sslctx.set_default_verify_paths();
 
     quic::connection conn {io, sslctx};
-    conn.set_host("localhost");
-    conn.set_alpn(quic::application_protocol_list {"http/1.0"});
+    conn.host("localhost");
+    conn.alpn(quic::application_protocol_list {"http/1.0"});
 
     quic::connect(conn, quic::resolve("localhost", "8443"));
 

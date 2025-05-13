@@ -3,7 +3,7 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 
-void run_conn(quic::connection conn) {
+boost::asio::awaitable<void> run_conn(quic::connection conn) {
     quic::stream stream;
     std::cout << std::format("{:-^64}\n", "waiting for stream");
     conn.accept_stream(stream);
@@ -21,12 +21,12 @@ void run_conn(quic::connection conn) {
     std::cout << std::format("{:-^64}\n", " response wrote ");
     std::cout << "size = " << size << "\n";
     stream.shutdown(boost::asio::socket_base::shutdown_send);
+
+DONE:
+    co_return;
 }
 
-
-
-
-void run(boost::asio::io_context& io) {
+boost::asio::awaitable<void> run(boost::asio::io_context& io) {
     boost::asio::ssl::context sslctx {SSL_CTX_new(OSSL_QUIC_server_method())};
     sslctx.use_certificate_chain_file("/data/stage/openssl-3.5.0/demos/guide/chain.pem");
     sslctx.use_private_key_file("/data/stage/openssl-3.5.0/demos/guide/pkey.pem",
@@ -38,20 +38,30 @@ void run(boost::asio::io_context& io) {
     server.alpn(quic::application_protocol_list {"http/1.0"});
     server.listen({ boost::asio::ip::make_address("127.0.0.1"), 8443 });
     for (;;) {
-        quic::connection conn {io, sslctx};
+        quic::connection conn{io, sslctx};
         std::cout << std::format("{:-^64}\n", "waiting for connection");
-        server.accept(conn);
+        co_await server.async_accept(conn, boost::asio::use_awaitable);
         std::cout << std::format("{:-^64}\n", "connection accepted");
-        run_conn(std::move(conn));
+        boost::asio::co_spawn(conn.get_executor(), run_conn(std::move(conn)), boost::asio::detached);
     }
+
+DONE:
+    co_return;
 }
-
-
-
 
 int main(int argc, char* argv[]) {
     boost::asio::io_context io;
-    run(io);
+
+    boost::asio::co_spawn(io, run(io), [](std::exception_ptr e){
+        try {
+            if (e) std::rethrow_exception(e);
+        } catch(const boost::system::system_error& ex) {
+            std::cout << "system_error: (" << ex.what() << "\n";
+        } catch(const std::exception& ex) {
+            std::cout << "exception: " << ex.what() << "\n";
+        }
+    });
     io.run();
+    std::cout << "done.\n";
     return 0;
 }

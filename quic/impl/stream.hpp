@@ -15,7 +15,12 @@ struct stream {
 
     stream(SSL* handle, impl::connection* conn)
     : handle_(handle)
-    , strand_(conn->strand_) {}
+    , strand_(conn->strand_) {
+        std::cout << "+stream\n";
+    }
+    ~stream() {
+        std::cout << "~stream\n";
+    }
 };
 
 } // namespace impl

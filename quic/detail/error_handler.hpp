@@ -54,8 +54,9 @@ namespace detail {
                 self.complete(boost::system::error_code{errno, boost::asio::error::get_system_category()});
                 return false;
             case SSL_ERROR_SSL:
-                error_ = ERR_get_error();
-                [[fallthrough]];
+                self.complete(translate_error(ERR_get_error()));
+                ERR_print_errors_fp(stderr);
+                return false;
             default:
                 self.complete(boost::system::error_code{static_cast<int>(error_), boost::asio::error::get_ssl_category()});
                 return false;
@@ -75,8 +76,8 @@ namespace detail {
                 self.complete(boost::system::error_code{errno, boost::asio::error::get_system_category()}, size);
                 return false;
             case SSL_ERROR_SSL:
-                error_ = ERR_get_error();
-                [[fallthrough]];
+                self.complete(translate_error(ERR_get_error()), size);
+                return false;
             default:
                 self.complete(boost::system::error_code{error_, boost::asio::error::get_ssl_category()}, size);
                 return false;
